@@ -45,12 +45,13 @@ protocols:
 # Updater-ready: electron-builder already writes latest*.yml next to the installers and app-update.yml
 # into the app. Turning updates on later = add electron-updater + `autoUpdater.checkForUpdatesAndNotify()`
 # in main and a `zip` mac target (Squirrel.Mac needs it). CI keeps uploading with --publish never.
+# The feed is the PUBLIC downloads repo (tags v<version>), filled by scripts/release/publish-launcher.sh
+# (docs/releasing.md). CI drafts in rwfresh/builderwars are never read by installed apps.
 publish:
   provider: github
   owner: rwfresh
-  repo: builderwars
-  releaseType: draft
-  tagNamePrefix: launcher-v
+  repo: builderwars-releases
+  releaseType: release
 
 linux:
   target:

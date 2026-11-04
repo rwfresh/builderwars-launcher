@@ -135,7 +135,9 @@ gh workflow run launcher.yml --ref main                        # manual; uses ta
 gh run watch                                                   # follow it
 ```
 
-A first job creates the draft release, or reuses it if one exists for the tag. Each platform job then runs `pnpm install --frozen-lockfile`, `pnpm --filter @builderwars/launcher build` and `electron-builder --<platform> --publish never`, and uploads `release/*` with `gh release upload --clobber`. Electron and electron-builder downloads are cached. Publish the release by hand on GitHub.
+A first job creates the draft release, or reuses it if one exists for the tag. Each platform job then runs `pnpm install --frozen-lockfile`, `pnpm --filter @builderwars/launcher build` and `electron-builder --<platform> --publish never`, checks the macOS signature and notarization when signing is on, writes `build-info-<platform>.json` (version, commit, run, signed, notarized), and uploads it with `release/*` via `gh release upload --clobber`. Electron and electron-builder downloads are cached.
+
+Players never download from this private repo. `scripts/release/publish-launcher.sh <version>` verifies a finished draft and copies it to the public repo [rwfresh/builderwars-releases](https://github.com/rwfresh/builderwars-releases) as `v<version>`, which [builderwars.ai/download](https://builderwars.ai/download) reads. The whole procedure, for agents and humans, is [docs/releasing.md](../../docs/releasing.md).
 
 Optional secrets (Settings > Secrets and variables > Actions). Builds are unsigned without them, and the macOS app is then ad-hoc signed (Gatekeeper blocks it: right-click > Open, or `xattr -dr com.apple.quarantine "/Applications/Builder Wars.app"`). The Tauri-era secret names keep working:
 
@@ -158,7 +160,7 @@ Signed builds use the hardened runtime with `build/entitlements.mac.plist`. Wind
 
 ## Follow-ups
 
-- **Updater:** add `electron-updater` and call `autoUpdater.checkForUpdatesAndNotify()` from main, and add a `zip` mac target (Squirrel.Mac needs it). `publish` in `electron-builder.yml` already points at this repo's releases with the `launcher-v` tag prefix, and CI already uploads `latest*.yml` and blockmaps. If the repo stays private, the updater needs a public feed (a `generic` provider) instead.
+- **Updater:** add `electron-updater` and call `autoUpdater.checkForUpdatesAndNotify()` from main, and add a `zip` mac target (Squirrel.Mac needs it). `publish` in `electron-builder.yml` already points at the public repo `rwfresh/builderwars-releases` (tags `v<version>`), and every published release there carries `latest*.yml` and the blockmaps.
 - **Tray icon** and level-up notifications (game-design-notes.md, "Extras").
 - **Windows code signing** once a certificate exists (electron-builder `win.signtoolOptions` or Azure Trusted Signing).
 - Electron fuses (`electronFuses`): keep `runAsNode` on, because node-pty on Windows forks a helper with `child_process.fork`.
