@@ -280,6 +280,40 @@ fn autotest_bridge(app: &AppHandle) {
     });
 }
 
+/// BW_AUTOTEST_POPUP=1: from our own site in the game pane, open (a) an about:blank popup that
+/// posts a message to its opener and closes itself, and (b) an accounts.google.com popup that the
+/// opener closes. Proves popups stay in-app, keep window.opener, and close.
+fn autotest_popup(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(8));
+        let Some(game) = app.get_webview(GAME) else { return };
+        let js = r#"
+          window.__bwPopup = {};
+          window.addEventListener('message', function (e) { if (e.data === 'bw-popup-hello') window.__bwPopup.message = 'received from popup (opener works)'; });
+          var w = window.open('about:blank', '_blank', 'width=500,height=600');
+          window.__bwPopup.blankOpened = !!w;
+          if (w) {
+            w.document.write('<title>bw popup test</title><p>popup test</p><script>window.opener.postMessage("bw-popup-hello", "*"); setTimeout(function () { window.close(); }, 1500);<\/script>');
+            w.document.close();
+          }
+          setTimeout(function () { window.__bwPopup.blankClosedItself = w ? w.closed : null; }, 4000);
+          var g = window.open('https://accounts.google.com/', '_blank', 'width=500,height=600');
+          window.__bwPopup.googleOpened = !!g;
+          setTimeout(function () { window.__bwPopup.googleOpenAfter5s = g ? !g.closed : null; if (g) g.close(); }, 5000);
+          setTimeout(function () { window.__bwPopup.googleClosedByOpener = g ? g.closed : null; }, 7000);
+        "#;
+        let _ = game.eval(js);
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        let windows: Vec<String> = app.webview_windows().keys().cloned().collect();
+        println!("[autotest] popup windows at +4s: {windows:?}");
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        let windows: Vec<String> = app.webview_windows().keys().cloned().collect();
+        println!("[autotest] popup windows at +9s: {windows:?}");
+        let _ = game.eval_with_callback("JSON.stringify(window.__bwPopup)", |r| println!("[autotest] popup result {r}"));
+    });
+}
+
 pub fn run() {
     envinfo::adopt_login_shell_path();
     // WebKitGTK's DMA-BUF renderer crashed the app once on this Wayland+NVIDIA machine
@@ -369,7 +403,7 @@ pub fn run() {
             let game_start: Url = format!("{site_url}/dashboard").parse()?;
             let script = bridge::init_script(&site_origin, &env, default_agent.as_deref(), use_herdr);
             let game = window.add_child(
-                panes::game_builder(&handle, game_start, script),
+                panes::game_builder(&handle, game_start, script, site_origin.clone()),
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(1.0, 1.0),
             )?;
@@ -425,6 +459,9 @@ pub fn run() {
 
             if std::env::var("BW_AUTOTEST").is_ok_and(|v| v == "1") {
                 autotest_bridge(&handle);
+            }
+            if std::env::var("BW_AUTOTEST_POPUP").is_ok_and(|v| v == "1") {
+                autotest_popup(&handle);
             }
             Ok(())
         })

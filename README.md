@@ -72,6 +72,27 @@ How a prompt runs: Rust's `run_prompt` validates the prompt (non-empty, at most 
 - **Why not `agent start` + `agent prompt`:** `agent start` returns `agent_not_ready` when the CLI opens a first-run or trust dialog (Claude's "trust this folder?"), and the prompt would be lost. Passing the prompt as the CLI's initial argument survives those dialogs, and herdr still detects and tracks the agent ("blocked" or "idle").
 - The herdr session keeps running after the launcher quits (that is how herdr works). Stop it with `herdr session stop builderwars`.
 
+## New windows and sign-in popups
+
+`window.open` and `target=_blank` requests from either pane are routed by `classify_new_window` in `panes.rs`:
+
+- **In-app "Sign in" popup** for Google (`google.com`, `*.google.com`), Apple (`apple.com`, `*.apple.com`), `api.x.com` / `api.twitter.com`, `about:blank`, and x.com requests that carry popup features.
+  - The popup is a small floating window related to the opener, so it shares the opener's cookies and `window.opener`/`postMessage` work.
+  - It closes when the page calls `window.close()`.
+  - It gets no scripts of ours and no IPC permissions.
+  - This fixes X's "Continue with Google/Apple" login, which used to jump to the system browser and hang there.
+- **x.com / twitter.com links** load in the X pane (and the X pane is revealed if it was collapsed).
+- **The site's own pages** (`target=_blank` in the game pane) load in the game pane.
+- **Everything else** goes to the system browser. Non-http(s) schemes are dropped.
+
+Same-window navigations are never diverted, so the site's "Sign in with X" redirect to x.com and back stays inside the game pane. The game pane's HOME button returns to the site origin from a dead end.
+
+Each decision is logged as `[pane] new-window <scheme://host> -> popup|navigate-x|navigate-self|external|deny`. Page-load logs also print only scheme and host, because full URLs can carry OAuth codes.
+
+Limitation: WebKitGTK does not report `window.open` features when the request is made, so on Linux an x.com `window.open` without a size cannot be told apart from a link and loads in the X pane. Windows and macOS pass the features through.
+
+`BW_AUTOTEST_POPUP=1` runs the popup self-test from the game pane: an about:blank popup posts to its opener and closes itself, and an accounts.google.com popup is closed by its opener.
+
 ## Layout notes
 
 - Child webviews always draw above the shell webview, so nothing of ours renders inside the pane rectangles. Settings take over the terminal column, and dropdowns live in the left toolbar.

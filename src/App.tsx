@@ -448,8 +448,8 @@ function Shell({ info }: { info: LauncherInfo }) {
             <button className="btn" title="Reload" onClick={() => void paneNav("game", "reload")}>
               ⟳
             </button>
-            <button className="btn" title="Dashboard" onClick={() => void paneNav("game", "go", `${info.siteUrl}/dashboard`)}>
-              ⌂
+            <button className="btn" title={`Home: back to ${siteHost}`} onClick={() => void paneNav("game", "go", `${info.siteOrigin}/`)}>
+              HOME
             </button>
             <span className="pane-title" title={panes.game.url}>
               {panes.game.loading ? "loading… " : ""}

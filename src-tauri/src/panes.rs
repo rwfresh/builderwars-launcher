@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
+use tauri::webview::{NewWindowFeatures, NewWindowResponse, PageLoadEvent, WebviewBuilder, WebviewWindowBuilder};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, Url, Webview, WebviewUrl, Window, Wry};
 #[cfg(not(target_os = "linux"))]
 use tauri::LogicalPosition;
@@ -72,7 +72,8 @@ pub fn web_profile_dir(app: &AppHandle) -> PathBuf {
 }
 
 fn emit_load(app: &AppHandle, pane: &'static str, url: &Url, phase: &'static str) {
-    println!("[{pane}] page-load {phase} {url}");
+    // Host only: full URLs can carry OAuth codes and tokens.
+    println!("[{pane}] page-load {phase} {}", host_for_log(url));
     let _ = app.emit_to(SHELL, "pane:load", PaneLoad { pane, url: url.to_string(), phase });
 }
 
@@ -107,37 +108,183 @@ fn common(builder: WebviewBuilder<Wry>, app: &AppHandle, pane: &'static str, dat
         .on_navigation(|url| matches!(url.scheme(), "http" | "https" | "about" | "blob" | "data"))
 }
 
-pub fn game_builder(app: &AppHandle, start: Url, init_script: String) -> WebviewBuilder<Wry> {
+/// What to do with a `window.open` / `target=_blank` request from a pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewWindow {
+    /// In-app "Sign in" popup window related to the opener (keeps `window.opener`, shares cookies).
+    Popup,
+    /// Load it in the X pane (tweet links etc.).
+    NavigateX,
+    /// Load it in the requesting pane itself (the site's own pages in the game pane).
+    NavigateSelf,
+    /// Hand it to the system browser.
+    External,
+    Deny,
+}
+
+impl NewWindow {
+    fn as_str(self) -> &'static str {
+        match self {
+            NewWindow::Popup => "popup",
+            NewWindow::NavigateX => "navigate-x",
+            NewWindow::NavigateSelf => "navigate-self",
+            NewWindow::External => "external",
+            NewWindow::Deny => "deny",
+        }
+    }
+}
+
+/// Identity providers used by X's login (Sign in with Google / Apple) and X's own OAuth hosts:
+/// their popups must stay in the app, because a popup opened in the system browser cannot talk
+/// back to its opener (`window.opener.postMessage`) and the login gets stuck.
+pub fn is_auth_host(url: &Url) -> bool {
+    let Some(h) = url.host_str() else { return false };
+    url.scheme() == "https"
+        && (h == "google.com"
+            || h.ends_with(".google.com")
+            || h == "apple.com"
+            || h.ends_with(".apple.com")
+            || h == "api.x.com"
+            || h == "api.twitter.com")
+}
+
+/// `has_popup_features`: the request carried a size/position (window.open with width/height).
+/// WebKitGTK does not report features when the request is made, so on Linux it is always false.
+pub fn classify_new_window(pane: &str, url: &Url, has_popup_features: bool, site_origin: &str) -> NewWindow {
+    if url.scheme() == "about" {
+        // window.open('') / about:blank, then scripted navigation: typical for auth popups.
+        return NewWindow::Popup;
+    }
+    if url.scheme() != "https" && url.scheme() != "http" {
+        return NewWindow::Deny;
+    }
+    if is_auth_host(url) {
+        return NewWindow::Popup;
+    }
+    if is_x_host(url) {
+        return if has_popup_features { NewWindow::Popup } else { NewWindow::NavigateX };
+    }
+    if pane == GAME && url.origin().ascii_serialization() == site_origin {
+        return NewWindow::NavigateSelf;
+    }
+    NewWindow::External
+}
+
+fn host_for_log(url: &Url) -> String {
+    format!("{}://{}", url.scheme(), url.host_str().unwrap_or(""))
+}
+
+static POPUP_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Build the in-app sign-in popup for a new-window request. Linux: the webview is related to the
+/// opener (same WebKitWebContext, so same cookies, and `window.opener` works); `window.close()`
+/// in the popup closes the window. Windows/macOS: Tauri passes the opener's WebView2 environment /
+/// WKWebViewConfiguration through `window_features` (untested there).
+fn open_popup(app: &AppHandle, from: &'static str, features: NewWindowFeatures) -> NewWindowResponse<Wry> {
+    let n = POPUP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let label = format!("signin-{n}");
+    let blank: Url = "about:blank".parse().expect("about:blank");
+    #[cfg_attr(target_os = "macos", allow(unused_mut))]
+    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(blank))
+        .title("Sign in")
+        .inner_size(520.0, 720.0) // window_features overrides this when the page asked for a size
+        .center()
+        .window_features(features)
+        .on_navigation(|url| matches!(url.scheme(), "http" | "https" | "about" | "blob" | "data"))
+        .on_page_load(move |_wv, payload| {
+            if matches!(payload.event(), PageLoadEvent::Finished) {
+                println!("[signin-{n}] page-load finished {}", host_for_log(payload.url()));
+            }
+        })
+        .on_new_window(move |url, _f| {
+            println!("[signin-{n}] new-window {} -> external", host_for_log(&url));
+            open_external(&url);
+            NewWindowResponse::Deny
+        });
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Linux ignores it for related views (they share the opener's context); Windows uses it
+        // together with the opener's environment.
+        builder = builder.data_directory(web_profile_dir(app));
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(main) = app.get_window("main") {
+        if let Ok(gw) = main.gtk_window() {
+            builder = builder.transient_for_raw(&gw);
+        }
+    }
+    match builder.build() {
+        Ok(window) => {
+            println!("[{from}] popup window {label} created");
+            #[cfg(target_os = "linux")]
+            {
+                // window.close() in the popup: WebKit emits "close" and wry answers by destroying
+                // the webview widget (which also drops later "close" handlers), leaving an empty
+                // window. Close the window when its webview widget is destroyed.
+                let w = window.clone();
+                let _ = window.with_webview(move |pv| {
+                    use gtk::prelude::WidgetExt;
+                    let w = w.clone();
+                    pv.inner().connect_destroy(move |_| {
+                        let _ = w.close();
+                    });
+                });
+            }
+            NewWindowResponse::Create { window }
+        }
+        Err(e) => {
+            eprintln!("[{from}] popup window failed: {e}");
+            NewWindowResponse::Deny
+        }
+    }
+}
+
+fn handle_new_window(
+    app: &AppHandle,
+    pane: &'static str,
+    site_origin: &str,
+    url: Url,
+    features: NewWindowFeatures,
+) -> NewWindowResponse<Wry> {
+    let decision = classify_new_window(pane, &url, features.size().is_some() || features.position().is_some(), site_origin);
+    println!("[{pane}] new-window {} -> {}", host_for_log(&url), decision.as_str());
+    match decision {
+        NewWindow::Popup => open_popup(app, pane, features),
+        NewWindow::NavigateX => {
+            if let Some(x) = app.get_webview(XPANE) {
+                let _ = x.navigate(url);
+                let _ = app.emit_to(SHELL, "pane:reveal", XPANE);
+            }
+            NewWindowResponse::Deny
+        }
+        NewWindow::NavigateSelf => {
+            if let Some(w) = app.get_webview(pane) {
+                let _ = w.navigate(url);
+            }
+            NewWindowResponse::Deny
+        }
+        NewWindow::External => {
+            open_external(&url);
+            NewWindowResponse::Deny
+        }
+        NewWindow::Deny => NewWindowResponse::Deny,
+    }
+}
+
+pub fn game_builder(app: &AppHandle, start: Url, init_script: String, site_origin: String) -> WebviewBuilder<Wry> {
     let a = app.clone();
+    // Same-window navigations (the site's "Sign in with X" redirect to x.com and back) stay in the
+    // game pane: on_navigation (in `common`) allows every http(s) URL; only new windows are routed.
     common(WebviewBuilder::new(GAME, WebviewUrl::External(start)), app, GAME, web_profile_dir(app))
         // Only our own site gets a script, and the script itself checks the origin.
         .initialization_script(init_script)
-        .on_new_window(move |url, _features| {
-            if is_x_host(&url) {
-                if let Some(x) = a.get_webview(XPANE) {
-                    let _ = x.navigate(url);
-                    let _ = a.emit_to(SHELL, "pane:reveal", XPANE);
-                }
-            } else {
-                open_external(&url);
-            }
-            NewWindowResponse::Deny
-        })
+        .on_new_window(move |url, features| handle_new_window(&a, GAME, &site_origin, url, features))
 }
 
 pub fn x_builder(app: &AppHandle, start: Url) -> WebviewBuilder<Wry> {
     let a = app.clone();
     common(WebviewBuilder::new(XPANE, WebviewUrl::External(start)), app, XPANE, web_profile_dir(app))
-        .on_new_window(move |url, _features| {
-            if is_x_host(&url) {
-                if let Some(x) = a.get_webview(XPANE) {
-                    let _ = x.navigate(url);
-                }
-            } else {
-                open_external(&url);
-            }
-            NewWindowResponse::Deny
-        })
+        .on_new_window(move |url, features| handle_new_window(&a, XPANE, "", url, features))
 }
 
 /// Linux: Tauri packs every child webview into the window's vertical GtkBox, where `set_bounds`
@@ -311,5 +458,39 @@ pub fn debug_snapshot(app: &AppHandle, dir: String) {
                 Err(e) => println!("[snapshot] {label} failed: {e}"),
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn c(pane: &str, url: &str, sized: bool) -> NewWindow {
+        classify_new_window(pane, &url.parse().unwrap(), sized, "https://builderwars.ai")
+    }
+
+    #[test]
+    fn auth_popups_stay_in_app() {
+        assert_eq!(c(XPANE, "https://accounts.google.com/gsi/select?client_id=x", false), NewWindow::Popup);
+        assert_eq!(c(XPANE, "https://appleid.apple.com/auth/authorize?x=1", false), NewWindow::Popup);
+        assert_eq!(c(GAME, "https://api.x.com/oauth/authorize", false), NewWindow::Popup);
+        assert_eq!(c(XPANE, "about:blank", false), NewWindow::Popup);
+    }
+
+    #[test]
+    fn x_links_navigate_unless_popup_features() {
+        assert_eq!(c(XPANE, "https://x.com/someone/status/1", false), NewWindow::NavigateX);
+        assert_eq!(c(GAME, "https://x.com/someone/status/1", false), NewWindow::NavigateX);
+        assert_eq!(c(XPANE, "https://x.com/i/flow/login", true), NewWindow::Popup);
+    }
+
+    #[test]
+    fn others() {
+        assert_eq!(c(GAME, "https://builderwars.ai/portfolio/x", false), NewWindow::NavigateSelf);
+        assert_eq!(c(XPANE, "https://builderwars.ai/portfolio/x", false), NewWindow::External);
+        assert_eq!(c(XPANE, "https://example.com/", false), NewWindow::External);
+        assert_eq!(c(XPANE, "https://google.com.evil.example/", false), NewWindow::External);
+        assert_eq!(c(XPANE, "file:///etc/passwd", false), NewWindow::Deny);
+        assert_eq!(c(XPANE, "http://accounts.google.com/", false), NewWindow::External);
     }
 }
