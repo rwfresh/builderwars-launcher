@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { debugLog, paneBounds, type ChildPane } from "./ipc";
 
 /**
- * Placeholder that a native child webview is laid over. Child webviews draw above the shell UI,
+ * Placeholder that a pane WebContentsView is laid over. The views draw above the shell UI,
  * so nothing of ours may render inside this rectangle. Bounds are pushed on every size/position
  * change (divider drags, window resizes, collapse).
  */
@@ -16,7 +16,7 @@ export function ChildPanePlaceholder({ pane, visible, label }: { pane: ChildPane
     let last = "";
     const push = () => {
       clearTimeout(timer);
-      // setTimeout, not requestAnimationFrame: rAF stops firing when WebKit thinks the view is hidden.
+      // setTimeout, not requestAnimationFrame: rAF can stop firing while the window is hidden/occluded.
       timer = setTimeout(() => {
         const r = el.getBoundingClientRect();
         const rect = { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };

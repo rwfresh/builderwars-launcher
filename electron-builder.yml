@@ -1,0 +1,116 @@
+# electron-builder config for the Builder Wars launcher (ARCHITECTURE.md §14, README "Packaging").
+# Local:  pnpm --filter @builderwars/launcher build && pnpm --filter @builderwars/launcher exec electron-builder --linux --publish never
+# CI:     .github/workflows/launcher.yml runs the same per platform and uploads release/* to a draft GitHub release.
+# Version comes from package.json. Signing is opt-in through env vars (CSC_LINK etc.); nothing here holds a secret.
+appId: ai.builderwars.launcher
+productName: Builder Wars
+copyright: Copyright © 2026 Builder Wars
+# deb/rpm (fpm) require a homepage; package.json has none, so it is supplied here.
+extraMetadata:
+  homepage: https://builderwars.ai
+
+directories:
+  buildResources: build # icons, entitlements, installer.nsh
+  output: release
+
+# electron-vite output, package.json and the Linux window icon. Production node_modules are added automatically
+# (electron-builder 26 collects them with `pnpm list`, so pnpm's isolated layout works without hoisting).
+files:
+  - out/**
+  - package.json
+  - build/icon.png # window icon on Linux (main loads <app>/build/icon.png)
+  # node-pty ships sources and Windows debug symbols (~50 MB of .pdb) we do not need at runtime.
+  - "!**/node_modules/node-pty/{src,deps,third_party,scripts,typings}/**"
+  - "!**/node_modules/node-pty/build/Release/obj.target/**"
+  - "!**/node_modules/node-pty/**/*.pdb"
+
+asar: true
+# node-pty loads pty.node and execs spawn-helper (macOS) / winpty-agent.exe (Windows) from disk;
+# it rewrites app.asar -> app.asar.unpacked itself.
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+# node-pty 1.x is an N-API addon: the binary built for Node also loads in Electron. macOS and
+# Windows use the prebuilds shipped in the package (both arches); Linux compiles it during
+# `pnpm install`. Skipping electron-builder's rebuild avoids compiling on Windows (needs
+# Spectre-mitigated MSVC libs) and cross-compiling x64 on the arm64 macOS runner.
+npmRebuild: false
+
+# builderwars://run?prompt=...  Linux: MimeType x-scheme-handler/builderwars in the .desktop file;
+# macOS: CFBundleURLTypes. Windows: registry keys from build/installer.nsh (NSIS has no built-in support).
+protocols:
+  - name: Builder Wars
+    schemes: [builderwars]
+
+# Updater-ready: electron-builder already writes latest*.yml next to the installers and app-update.yml
+# into the app. Turning updates on later = add electron-updater + `autoUpdater.checkForUpdatesAndNotify()`
+# in main and a `zip` mac target (Squirrel.Mac needs it). CI keeps uploading with --publish never.
+publish:
+  provider: github
+  owner: rwfresh
+  repo: builderwars
+  releaseType: draft
+  tagNamePrefix: launcher-v
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  executableName: builderwars-launcher
+  icon: build/icon.png
+  category: Game
+  synopsis: Builder Wars launcher
+  description: Builder Wars desktop launcher - terminal for your AI agent, the game and x.com in one window.
+  maintainer: Rich Williams <rich@wifidelity.com>
+  vendor: Builder Wars
+  # Uses package.json desktopName (if set) for the .desktop file name so it matches Electron's Wayland app_id.
+  syncDesktopName: true
+  artifactName: builderwars-launcher-${version}-linux-${arch}.${ext}
+
+appImage:
+  # electron-builder's default puts --no-sandbox in the AppImage's .desktop Exec, which turns off Chromium's
+  # sandbox for every renderer (x.com included). Without it AppRun adds the flag only when unprivileged
+  # user namespaces are unavailable (`unshare -Ur true` fails).
+  executableArgs: []
+
+deb:
+  packageName: builderwars-launcher
+rpm:
+  packageName: builderwars-launcher
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+
+nsis:
+  oneClick: true
+  perMachine: false # per-user install, no admin prompt; registry writes go to HKCU
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Builder Wars
+  artifactName: builderwars-launcher-${version}-windows-${arch}-setup.${ext}
+  # build/installer.nsh (picked up automatically) registers builderwars:// at install time.
+
+mac:
+  # Separate Intel and Apple Silicon dmgs instead of one universal app: node-pty ships per-arch
+  # Mach-O prebuilds that @electron/universal refuses to merge without extra rules, and each dmg is half the size.
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: build/icon.icns
+  category: public.app-category.games
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarization runs only when APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID are set (and the app is signed).
+  # Unsigned CI builds are ad-hoc signed instead (-c.mac.identity=- -c.mac.hardenedRuntime=false), see the workflow.
+  artifactName: builderwars-launcher-${version}-macos-${arch}.${ext}
+
+dmg:
+  title: Builder Wars ${version}

@@ -1,7 +1,7 @@
-import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { AGENT_LABELS, buildCommand, chooseAgent, isAgentId, shellKindFromPath, type AgentId } from "./agents";
 import { isXUrl, paneLoadSchema, paneTitleSchema, parseDeepLinkRequests, parseRunPromptEvent, parseSiteUrl } from "./bridge";
+import { SHELL_EVENTS } from "../electron/shared/contract";
 import { ChildPanePlaceholder } from "./ChildPane";
 import {
   bridgeResolve,
@@ -9,6 +9,7 @@ import {
   deeplinkTake,
   herdrDispatch,
   launcherInfo,
+  onLauncherEvent,
   paneFocus,
   paneNav,
   pickWorkDir,
@@ -173,7 +174,7 @@ function Shell({ info }: { info: LauncherInfo }) {
     }
   }, []);
 
-  // Bridge + pane events from Rust.
+  // Bridge + pane events from the main process.
   const enqueueRef = useRef(enqueue);
   enqueueRef.current = enqueue;
   const layoutRef = useRef(layout);
@@ -182,42 +183,42 @@ function Shell({ info }: { info: LauncherInfo }) {
   focusedRef.current = focused;
   useEffect(() => {
     const unsubs = [
-      listen("bridge:run-prompt", (ev) => {
-        const req = parseRunPromptEvent(ev.payload);
+      onLauncherEvent(SHELL_EVENTS.bridgeRunPrompt, (payload) => {
+        const req = parseRunPromptEvent(payload);
         if (!req) return;
         enqueueRef.current("site", req.prompt, req.agent ?? null, req.id);
       }),
-      listen<number>("bridge:expired", (ev) => {
-        setQueue((q) => q.filter((r) => r.bridgeId !== ev.payload));
+      onLauncherEvent(SHELL_EVENTS.bridgeExpired, (id) => {
+        setQueue((q) => q.filter((r) => r.bridgeId !== id));
       }),
-      listen("deeplink:pending", () => {
+      onLauncherEvent(SHELL_EVENTS.deeplinkPending, () => {
         void deeplinkTake().then((reqs) =>
           parseDeepLinkRequests(reqs).forEach((r) => enqueueRef.current("deeplink", r.prompt, r.agent ?? null)),
         );
       }),
-      listen<string>("launcher:notice", (ev) => setStatus(String(ev.payload))),
-      listen("pane:load", (ev) => {
-        const p = paneLoadSchema.safeParse(ev.payload);
+      onLauncherEvent(SHELL_EVENTS.notice, (msg) => setStatus(String(msg))),
+      onLauncherEvent(SHELL_EVENTS.paneLoad, (payload) => {
+        const p = paneLoadSchema.safeParse(payload);
         if (!p.success) return;
         setPanes((s) => ({ ...s, [p.data.pane]: { ...s[p.data.pane], url: p.data.url, loading: p.data.phase === "started" } }));
       }),
-      listen("pane:title", (ev) => {
-        const p = paneTitleSchema.safeParse(ev.payload);
+      onLauncherEvent(SHELL_EVENTS.paneTitle, (payload) => {
+        const p = paneTitleSchema.safeParse(payload);
         if (!p.success) return;
         setPanes((s) => ({ ...s, [p.data.pane]: { ...s[p.data.pane], title: p.data.title } }));
       }),
-      listen("pane:reveal", () => setLayout((l) => toggleCollapsed(l, "xpane", false))),
-      listen("focus:cycle", () => focusPane(nextFocus(focusedRef.current, layoutRef.current.collapsed))),
+      onLauncherEvent(SHELL_EVENTS.paneReveal, () => setLayout((l) => toggleCollapsed(l, "xpane", false))),
+      onLauncherEvent(SHELL_EVENTS.focusCycle, () => focusPane(nextFocus(focusedRef.current, layoutRef.current.collapsed))),
     ];
     // Links that arrived before we listened (cold start from a builderwars:// link).
     void deeplinkTake().then((reqs) =>
       parseDeepLinkRequests(reqs).forEach((r) => enqueueRef.current("deeplink", r.prompt, r.agent ?? null)),
     );
-    return () => unsubs.forEach((u) => void u.then((f) => f()));
+    return () => unsubs.forEach((u) => u());
   }, [focusPane]);
 
   // Autotest: answer confirmations by themselves (site -> Cancel, deep link -> Run), late enough
-  // for the Rust side to snapshot the dialog first.
+  // for the main process to snapshot the dialog first.
   useEffect(() => {
     if (!info.autotest || !confirm) return;
     const t = setTimeout(() => {
@@ -227,20 +228,20 @@ function Shell({ info }: { info: LauncherInfo }) {
     return () => clearTimeout(t);
   }, [info.autotest, confirm, decide]);
 
-  // F6 / Ctrl+` cycle focus. On Linux, Rust catches F6 at the GTK window level (so it also works
-  // while a child webview has focus) and emits focus:cycle; this handler covers the other platforms.
+  // F6 / Ctrl+` cycle focus. The main process catches F6 in every pane (before-input-event, so it
+  // also works while a web pane has keyboard focus) and emits focus:cycle; Ctrl+` is handled here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key === "F6" && env.platform !== "linux") || (e.ctrlKey && e.key === "`")) {
+      if (e.ctrlKey && e.key === "`") {
         e.preventDefault();
         focusPane(nextFocus(focusedRef.current, layoutRef.current.collapsed));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [env.platform, focusPane]);
+  }, [focusPane]);
 
-  // Autotest: show the PTY works with a real agent CLI (Rust drives the bridge test separately).
+  // Autotest: show the PTY works with a real agent CLI (main drives the bridge test separately).
   useEffect(() => {
     if (!info.autotest) return;
     const t = setTimeout(() => {
@@ -254,8 +255,8 @@ function Shell({ info }: { info: LauncherInfo }) {
         );
       }
     }, 3000);
-    // Layout exercise: drag the first divider, collapse and re-expand the X pane. The child
-    // webview bounds that follow are visible in the launcher log (BW_DEBUG_BOUNDS=1).
+    // Layout exercise: drag the first divider, collapse and re-expand the X pane. The pane view
+    // bounds that follow are visible in the launcher log (BW_DEBUG_BOUNDS=1).
     const steps = [
       setTimeout(() => {
         void debugLog("autotest: drag divider 1 by +60px");
@@ -435,7 +436,7 @@ function Shell({ info }: { info: LauncherInfo }) {
 
       <div className="divider" onPointerDown={onDividerDown(0)} onPointerMove={onDividerMove} onPointerUp={onDividerUp} />
 
-      {/* CENTER: game child webview */}
+      {/* CENTER: game pane (WebContentsView) */}
       {layout.collapsed.game ? (
         <CollapsedStrip label="GAME" onExpand={() => collapse("game")} />
       ) : (
@@ -465,7 +466,7 @@ function Shell({ info }: { info: LauncherInfo }) {
 
       <div className="divider" onPointerDown={onDividerDown(1)} onPointerMove={onDividerMove} onPointerUp={onDividerUp} />
 
-      {/* RIGHT: X child webview */}
+      {/* RIGHT: X pane (WebContentsView) */}
       {layout.collapsed.xpane ? (
         <CollapsedStrip label="X" onExpand={() => collapse("xpane")} />
       ) : (

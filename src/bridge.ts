@@ -1,8 +1,9 @@
-// Bridge contract between the game site (https://builderwars.ai, in the `game` child webview) and
-// the launcher. The launcher injects `window.builderwarsLauncher` into the game webview only, and
-// only when the page is on the configured site origin (src-tauri/src/bridge_init.js). Calls travel
-// over Tauri IPC (run_prompt / open_x commands, granted to that webview+origin only). Rust forwards
-// run_prompt to this shell UI as a `bridge:run-prompt` event, the shell answers via bridge_resolve.
+// Bridge contract between the game site (https://builderwars.ai, in the `game` WebContentsView) and
+// the launcher. The game preload (electron/preload/game.ts) defines `window.builderwarsLauncher` in
+// the game view only, and only when the top-level page is on the configured site origin. Calls travel
+// over Electron IPC (BRIDGE_CHANNELS in electron/shared/contract.ts); the main process re-checks the
+// sender (game view, top frame, site origin), forwards run_prompt to this shell UI as a
+// `bridge:run-prompt-request` event (SHELL_EVENTS.bridgeRunPrompt), and the shell answers via bridgeResolve.
 import { z } from "zod";
 
 export type LauncherPlatform = "linux" | "macos" | "windows";
@@ -20,12 +21,12 @@ export interface BuilderwarsLauncherApi {
   openX(url?: string | null): Promise<void>;
 }
 
-/** Must match MAX_PROMPT_CHARS in src-tauri/src/bridge.rs. */
+/** Must match MAX_PROMPT_CHARS in electron/shared/contract.ts (enforced by electron/main/validate.ts). */
 export const MAX_PROMPT_CHARS = 16_000;
 
 export const runPromptEventSchema = z.object({
   id: z.number().int().nonnegative(),
-  prompt: z.string().min(1).max(MAX_PROMPT_CHARS * 2), // chars vs UTF-16 units; Rust checks chars
+  prompt: z.string().min(1).max(MAX_PROMPT_CHARS * 2), // code points vs UTF-16 units; main checks code points
   agent: z.string().max(32).nullable().optional(),
 });
 export type RunPromptEvent = z.infer<typeof runPromptEventSchema>;
@@ -35,7 +36,7 @@ export function parseRunPromptEvent(payload: unknown): RunPromptEvent | null {
   return r.success ? r.data : null;
 }
 
-/** A queued `builderwars://run?prompt=...&agent=...` request (validated again in Rust). */
+/** A queued `builderwars://run?prompt=...&agent=...` request (validated in the main process, electron/main/deeplink.ts). */
 export const deepLinkRequestSchema = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_CHARS * 2),
   agent: z.string().max(32).nullable().optional(),
@@ -54,7 +55,7 @@ export const paneLoadSchema = z.object({
 });
 export const paneTitleSchema = z.object({ pane: z.enum(["game", "xpane"]), title: z.string() });
 
-/** Same rule as panes::is_x_host in Rust: https and x.com / twitter.com (or subdomains). */
+/** Same rule as isXHost in electron/main/urls.ts: https and x.com / twitter.com (or subdomains). */
 export function isXUrl(raw: string): boolean {
   let u: URL;
   try {
