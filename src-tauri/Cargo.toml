@@ -1,0 +1,36 @@
+[package]
+name = "builderwars-launcher"
+version = "0.1.0"
+description = "Builder Wars desktop launcher"
+edition = "2021"
+rust-version = "1.80"
+publish = false
+
+[lib]
+name = "builderwars_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `unstable` enables multiwebview (Window::add_child), needed for the X pane.
+tauri = { version = "2", features = ["unstable"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+portable-pty = "0.9"
+which = "7"
+tokio = { version = "1", features = ["sync", "time"] }
+
+[features]
+default = []
+# The tray icon needs libayatana-appindicator on Linux; off for the spike.
+tray = ["tauri/tray-icon"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Same versions as tauri-runtime-wry/wry use; needed to position child webviews (GtkOverlay)
+# and for native back navigation.
+gtk = "0.18"
+webkit2gtk = "2.0"
+# png: debug snapshots of the webviews (BW_SNAPSHOT_DIR), used to verify layout without grim.
+cairo-rs = { version = "0.18", features = ["png"] }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bridge-resolve"
+description = "Enables the bridge_resolve command without any pre-configured scope."
+commands.allow = ["bridge_resolve"]
+
+[[permission]]
+identifier = "deny-bridge-resolve"
+description = "Denies the bridge_resolve command without any pre-configured scope."
+commands.deny = ["bridge_resolve"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pty-is-idle"
+description = "Enables the pty_is_idle command without any pre-configured scope."
+commands.allow = ["pty_is_idle"]
+
+[[permission]]
+identifier = "deny-pty-is-idle"
+description = "Denies the pty_is_idle command without any pre-configured scope."
+commands.deny = ["pty_is_idle"]
