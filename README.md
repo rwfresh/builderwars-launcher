@@ -86,6 +86,8 @@ Each decision is logged as `[pane] new-window <scheme://host> -> popup|navigate-
 
 **Why Electron.** The first launcher used Tauri 2 (WebKitGTK on Linux). There, X's "Continue with Google" never completes: Google's popup and hand-back finish, then x.com logs `Input2SSO: Unsupported provider` and drops the credential. No WebKit setting changed that. In Chromium the same flow behaves like Chrome. The web session's user agent is Chromium's default minus the `Electron/...` and app tokens, because Google refuses sign-in to user agents that advertise an embedded app.
 
+**First-time Google sign-in (verified Nov 4 2026, Linux).** On a profile with no Google session yet, the first "Continue with Google" walks Google's full sign-in pages inside the popup; one of them enforces `Cross-Origin-Opener-Policy: same-origin`, which detaches the popup from x.com for good (Chromium logs "Cross-Origin-Opener-Policy policy would block the window.postMessage call"), so X stays signed out even though Google finished. The Google session is now in the shared `persist:web` profile, and the next click goes account chooser -> consent -> hand-back and signs X in. Clicking the button twice on first use is expected; nothing in the launcher can shorten that without touching Google's or X's pages.
+
 ## Layout notes
 
 - The web panes are `WebContentsView`s added on top of the shell renderer. The shell renders placeholder boxes and sends their rectangles through `pane:bounds`. The shell's CSS px equal the window's DIPs, so the rectangles are used as they are, with no scale conversion. A collapsed or tiny pane is hidden with `setVisible(false)`.
