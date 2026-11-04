@@ -8,7 +8,7 @@
 // opens a first-run/trust dialog and the prompt would be lost, while passing the prompt as the CLI's
 // initial-prompt argument survives such dialogs. herdr still detects and tracks the agent in the pane.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { HERDR_SESSION, type HerdrDispatch } from "../shared/contract";
 import { childEnv } from "./childenv";
 
@@ -87,4 +87,36 @@ export async function dispatch(command: string, cwd: string, herdr: HerdrRunner 
   }
   await herdr(["pane", "run", target, command]);
   return { paneId: target, split };
+}
+
+/** Runs `herdr session <verb> builderwars` (no --session prefix: these address the server, not a pane). */
+export type SessionCmdRunner = (verb: "stop" | "delete") => Promise<void>;
+
+export const runSessionCmd: SessionCmdRunner = (verb) =>
+  new Promise((resolve, reject) => {
+    execFile("herdr", ["session", verb, HERDR_SESSION], { env: childEnv(), timeout: 5000, encoding: "utf8" }, (err, _stdout, stderr) => {
+      if (err) reject(new Error(`herdr session ${verb}: ${String(stderr).trim() || err.message}`));
+      else resolve();
+    });
+  });
+
+/**
+ * A launch starts from a clean terminal: stop the launcher's herdr session if a previous run (or a
+ * crash) left it running in herdr's background server, and delete its saved layout, so
+ * `herdr --session builderwars` opens one pane instead of restoring every split ever made.
+ * Both steps are best effort: "no such session" is the normal case.
+ */
+export async function resetSession(run: SessionCmdRunner = runSessionCmd): Promise<{ stopped: boolean; deleted: boolean }> {
+  const stopped = await run("stop").then(() => true, () => false);
+  const deleted = await run("delete").then(() => true, () => false);
+  return { stopped, deleted };
+}
+
+/** On quit: end the session so nothing keeps running in herdr's server after the launcher closes. Synchronous, bounded. */
+export function stopSessionSync(): void {
+  try {
+    execFileSync("herdr", ["session", "stop", HERDR_SESSION], { env: childEnv(), timeout: 3000, stdio: "ignore" });
+  } catch {
+    /* not running, or herdr missing */
+  }
 }

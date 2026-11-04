@@ -24,7 +24,7 @@ import { autotestBridge, autotestPopup } from "./autotest";
 import { PromptBridge } from "./bridge";
 import { DeepLinkQueue, deepLinksInArgv } from "./deeplink";
 import { adoptLoginShellPath, detect } from "./envinfo";
-import { dispatch as herdrDispatch } from "./herdr";
+import { dispatch as herdrDispatch, resetSession as resetHerdrSession, stopSessionSync as stopHerdrSession } from "./herdr";
 import { dimArg, handleBridge, handleShell, idArg, paneArg, rectArg } from "./ipc";
 import { Panes } from "./panes";
 import { PtyManager } from "./pty";
@@ -172,8 +172,13 @@ function main(): void {
     settings = s;
     return dir;
   });
-  handleShell(SHELL_CHANNELS.ptySpawn, z.tuple([z.enum(["shell", "herdr"]), dimArg, dimArg]), shellWc, (mode, cols, rows) => {
+  handleShell(SHELL_CHANNELS.ptySpawn, z.tuple([z.enum(["shell", "herdr"]), dimArg, dimArg]), shellWc, async (mode, cols, rows) => {
     try {
+      if (mode === "herdr") {
+        // One pane per launch: drop whatever a previous run left in herdr's background server.
+        const r = await resetHerdrSession();
+        console.log(`[herdr] session reset stopped=${r.stopped} deleted=${r.deleted}`);
+      }
       const id = pty.spawn(mode, cols, rows, workDir());
       console.log(`[pty] spawn mode=${mode} ${cols}x${rows} -> Ok(${id})`);
       return id;
@@ -247,7 +252,10 @@ function main(): void {
   const coldLinks = deepLinksInArgv(process.argv.slice(1));
 
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => pty.killAll());
+  app.on("before-quit", () => {
+    pty.killAll();
+    stopHerdrSession();
+  });
 
   void app.whenReady().then(() => {
     // Our own UI (default session) never needs a permission prompt beyond clipboard writes.

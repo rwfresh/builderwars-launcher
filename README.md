@@ -66,7 +66,7 @@ How a prompt runs: main validates the prompt (non-empty, at most 16,000 chars, n
 - Without herdr, the command is typed only when the shell is idle (the PTY's foreground process group is the shell). Otherwise the site gets "the terminal is busy".
 - **herdr mode** (on by default when `herdr` is installed): the pane runs `herdr --session builderwars`, a dedicated session that never touches your default one. `HERDR_*` variables are stripped so it works even when the launcher itself was started inside herdr. To dispatch a prompt, the launcher calls `herdr pane list` to find the focused pane and `pane process-info` to check that its shell is idle. If it is busy, it calls `pane split --direction right`. Then `pane run <pane> "<agent command>"`.
 - **Why not `agent start` + `agent prompt`:** `agent start` returns `agent_not_ready` when the CLI opens a first-run or trust dialog (Claude's "trust this folder?"), and the prompt would be lost. Passing the prompt as the CLI's initial argument survives those dialogs, and herdr still detects and tracks the agent ("blocked" or "idle").
-- The herdr session keeps running after the launcher quits (that is how herdr works). Stop it with `herdr session stop builderwars`.
+- **One pane per launch.** herdr keeps sessions alive in a background server and restores every pane on reattach, so without intervention each launch would reopen all the splits earlier prompts created. The launcher therefore runs `herdr session stop builderwars` + `session delete builderwars` before starting the terminal and stops the session again on quit. Agents end with the launcher, like in a normal terminal. (A "keep the session between launches" setting is a possible follow-up.)
 
 ## New windows and sign-in popups
 

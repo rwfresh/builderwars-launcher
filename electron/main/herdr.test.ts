@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dispatch, type HerdrRunner } from "./herdr";
+import { dispatch, resetSession, type HerdrRunner, type SessionCmdRunner } from "./herdr";
 
 function fake(responses: Record<string, unknown>): { run: HerdrRunner; calls: string[][] } {
   const calls: string[][] = [];
@@ -39,5 +39,23 @@ describe("herdr dispatch (port of herdr.rs)", () => {
   it("reports unexpected shapes", async () => {
     await expect(dispatch("x", "/w", fake({ "pane list": { result: {} } }).run)).rejects.toThrow("herdr pane list: unexpected shape");
     await expect(dispatch("x", "/w", fake({ "pane list": { result: { panes: [] } } }).run)).rejects.toThrow("herdr has no panes");
+  });
+});
+
+describe("herdr session reset (one pane per launch)", () => {
+  it("stops, then deletes, the launcher session", async () => {
+    const calls: string[] = [];
+    const run: SessionCmdRunner = async (verb) => {
+      calls.push(verb);
+    };
+    expect(await resetSession(run)).toEqual({ stopped: true, deleted: true });
+    expect(calls).toEqual(["stop", "delete"]);
+  });
+
+  it("treats a missing session as the normal case", async () => {
+    const run: SessionCmdRunner = async (verb) => {
+      throw new Error(`herdr session ${verb}: no such session`);
+    };
+    expect(await resetSession(run)).toEqual({ stopped: false, deleted: false });
   });
 });
