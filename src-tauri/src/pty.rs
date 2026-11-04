@@ -52,7 +52,7 @@ fn take_utf8(pending: &mut Vec<u8>) -> String {
     }
 }
 
-fn build_command(mode: &str) -> CommandBuilder {
+fn build_command(mode: &str, cwd: &std::path::Path) -> CommandBuilder {
     let mut cmd = if mode == "herdr" {
         let mut c = CommandBuilder::new("herdr");
         c.args(["--session", HERDR_SESSION]);
@@ -65,9 +65,7 @@ fn build_command(mode: &str) -> CommandBuilder {
         // $SHELL (passwd entry fallback) as a login shell.
         CommandBuilder::new_default_prog()
     };
-    if let Some(home) = dirs_home() {
-        cmd.cwd(home);
-    }
+    cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("BUILDERWARS_LAUNCHER", "1");
@@ -86,20 +84,23 @@ fn build_command(mode: &str) -> CommandBuilder {
     cmd
 }
 
-fn dirs_home() -> Option<String> {
-    std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok()
-}
-
 fn log_path() -> Option<String> {
     std::env::var("BW_PTY_LOG").ok().filter(|s| !s.is_empty())
 }
 
 impl PtyState {
-    pub fn spawn(&self, mode: &str, cols: u16, rows: u16, on_event: Channel<PtyEvent>) -> Result<u32, String> {
+    pub fn spawn(
+        &self,
+        mode: &str,
+        cols: u16,
+        rows: u16,
+        cwd: &std::path::Path,
+        on_event: Channel<PtyEvent>,
+    ) -> Result<u32, String> {
         let pair = native_pty_system()
             .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| e.to_string())?;
-        let mut child = pair.slave.spawn_command(build_command(mode)).map_err(|e| e.to_string())?;
+        let mut child = pair.slave.spawn_command(build_command(mode, cwd)).map_err(|e| e.to_string())?;
         drop(pair.slave);
         let pid = child.process_id();
         let killer = child.clone_killer();

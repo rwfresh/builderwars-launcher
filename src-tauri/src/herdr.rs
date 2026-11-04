@@ -42,7 +42,9 @@ pub struct Dispatch {
     pub split: bool,
 }
 
-pub fn dispatch(command: &str) -> Result<Dispatch, String> {
+/// `command` already starts with a `cd <work dir> &&` prefix (built by the shell UI); `cwd` is used for
+/// new splits so the pane opens there too.
+pub fn dispatch(command: &str, cwd: &std::path::Path) -> Result<Dispatch, String> {
     let list = herdr(&["pane", "list"])?;
     let panes = list
         .pointer("/result/panes")
@@ -68,8 +70,8 @@ pub fn dispatch(command: &str) -> Result<Dispatch, String> {
     let (target, split) = if idle {
         (pane_id, false)
     } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        let res = herdr(&["pane", "split", "--pane", &pane_id, "--direction", "right", "--cwd", &home])?;
+        let cwd = cwd.to_string_lossy();
+        let res = herdr(&["pane", "split", "--pane", &pane_id, "--direction", "right", "--cwd", &cwd])?;
         let id = res
             .pointer("/result/pane/pane_id")
             .and_then(Value::as_str)

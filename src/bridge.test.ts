@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { isXUrl, parseRunPromptEvent, parseSiteUrl, type BuilderwarsLauncherApi } from "./bridge";
+import { isXUrl, parseDeepLinkRequests, parseRunPromptEvent, parseSiteUrl, type BuilderwarsLauncherApi } from "./bridge";
 
 const INIT_JS = readFileSync(fileURLToPath(new URL("../src-tauri/src/bridge_init.js", import.meta.url)), "utf8");
 
@@ -67,6 +67,12 @@ describe("bridge payload parsing", () => {
     expect(parseRunPromptEvent({ id: -1, prompt: "hi" })).toBeNull();
     expect(parseRunPromptEvent({ id: 1, prompt: "" })).toBeNull();
     expect(parseRunPromptEvent("nope")).toBeNull();
+  });
+
+  it("parses queued deep-link requests", () => {
+    expect(parseDeepLinkRequests([{ prompt: "hi", agent: "codex" }, { prompt: "yo", agent: null }])).toHaveLength(2);
+    expect(parseDeepLinkRequests([{ prompt: "" }])).toEqual([]);
+    expect(parseDeepLinkRequests(null)).toEqual([]);
   });
 
   it("only accepts https x.com URLs for the X pane", () => {

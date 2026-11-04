@@ -30,6 +30,9 @@ struct RunPromptEvent {
     agent: Option<String>,
 }
 
+/// Generous: the shell asks the player to confirm before anything runs.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(300);
+
 #[derive(Serialize)]
 pub struct RunPromptResult {
     agent: String,
@@ -90,8 +93,11 @@ pub async fn run_prompt(
     println!("[bridge] run_prompt #{id} from {} agent={agent:?} ({} chars)", webview.label(), prompt.chars().count());
     app.emit_to(SHELL, "bridge:run-prompt", RunPromptEvent { id, prompt, agent })
         .map_err(|e| e.to_string())?;
-    let res = tokio::time::timeout(Duration::from_secs(60), rx).await;
-    bridge.pending.lock().unwrap().remove(&id);
+    let res = tokio::time::timeout(ANSWER_TIMEOUT, rx).await;
+    if bridge.pending.lock().unwrap().remove(&id).is_some() {
+        // Timed out: drop the confirmation the shell may still be showing.
+        let _ = app.emit_to(SHELL, "bridge:expired", id);
+    }
     match res {
         Ok(Ok(Ok(agent))) => Ok(RunPromptResult { agent }),
         Ok(Ok(Err(msg))) => Err(msg),

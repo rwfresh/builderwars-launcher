@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentArgv, buildCommand, chooseAgent, quoteArg, sanitizePrompt, shellKindFromPath } from "./agents";
+import { agentArgv, buildCommand, cdPrefix, chooseAgent, quoteArg, quoteDir, sanitizePrompt, shellKindFromPath } from "./agents";
 
 describe("agent command mapping", () => {
   it("maps each CLI to its initial-prompt syntax", () => {
@@ -19,6 +19,24 @@ describe("agent command mapping", () => {
     expect(buildCommand("claude", "hello world", "posix")).toBe('claude "hello world"');
     expect(buildCommand("gemini", "make a promo", "posix")).toBe('gemini -i "make a promo"');
     expect(buildCommand("opencode", "x y", "powershell")).toBe("opencode --prompt 'x y'");
+  });
+});
+
+describe("work directory prefix", () => {
+  it("cds into the work dir before starting the agent", () => {
+    expect(buildCommand("claude", "hello", "posix", { cwd: "/home/u/BuilderWars", home: "/home/u" })).toBe(
+      "cd ~/BuilderWars && claude hello",
+    );
+    expect(buildCommand("claude", "hi there", "fish", { cwd: "/srv/my bw" })).toBe('cd "/srv/my bw" && claude "hi there"');
+    expect(buildCommand("codex", "x", "powershell", { cwd: "C:\\Users\\u\\BuilderWars" })).toBe(
+      "Set-Location -LiteralPath 'C:\\Users\\u\\BuilderWars'; codex x",
+    );
+  });
+
+  it("quotes unusual directories instead of using ~", () => {
+    expect(quoteDir("/home/u/it's", "posix", "/home/u")).toBe(`"/home/u/it's"`);
+    expect(quoteDir("/home/u", "posix", "/home/u/")).toBe("~");
+    expect(cdPrefix("/tmp/$x", "posix")).toBe("cd '/tmp/$x' && ");
   });
 });
 

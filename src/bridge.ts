@@ -35,6 +35,18 @@ export function parseRunPromptEvent(payload: unknown): RunPromptEvent | null {
   return r.success ? r.data : null;
 }
 
+/** A queued `builderwars://run?prompt=...&agent=...` request (validated again in Rust). */
+export const deepLinkRequestSchema = z.object({
+  prompt: z.string().min(1).max(MAX_PROMPT_CHARS * 2),
+  agent: z.string().max(32).nullable().optional(),
+});
+export type DeepLinkRequest = z.infer<typeof deepLinkRequestSchema>;
+
+export function parseDeepLinkRequests(payload: unknown): DeepLinkRequest[] {
+  const r = z.array(deepLinkRequestSchema).safeParse(payload);
+  return r.success ? r.data : [];
+}
+
 export const paneLoadSchema = z.object({
   pane: z.enum(["game", "xpane"]),
   url: z.string(),

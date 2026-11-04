@@ -62,6 +62,9 @@ pub fn open_external(url: &Url) {
 /// Shared persistent profile for the game and X webviews: the player signs in to X once and both
 /// the site's "Sign in with X" OAuth and x.com see the same first-party cookies.
 pub fn web_profile_dir(app: &AppHandle) -> PathBuf {
+    if let Some(root) = crate::settings::data_root_override() {
+        return root.join("web-profile");
+    }
     app.path()
         .app_local_data_dir()
         .unwrap_or_else(|_| std::env::temp_dir().join("builderwars-launcher"))
@@ -73,11 +76,23 @@ fn emit_load(app: &AppHandle, pane: &'static str, url: &Url, phase: &'static str
     let _ = app.emit_to(SHELL, "pane:load", PaneLoad { pane, url: url.to_string(), phase });
 }
 
+/// macOS has no per-webview data directory (WKWebView); macOS 14+ uses a named persistent
+/// WKWebsiteDataStore instead (older macOS falls back to the default store, shared with the shell).
+/// Fixed UUID so the store survives restarts; shared by the game and X webviews.
+#[cfg(target_os = "macos")]
+const WEB_PROFILE_STORE_ID: [u8; 16] = [
+    0x6b, 0x2f, 0x3e, 0x91, 0x5c, 0x0a, 0x4d, 0x8e, 0x9b, 0x77, 0x21, 0xd4, 0xb0, 0x5e, 0x13, 0xa6,
+];
+
 fn common(builder: WebviewBuilder<Wry>, app: &AppHandle, pane: &'static str, data_dir: PathBuf) -> WebviewBuilder<Wry> {
     let a1 = app.clone();
     let a2 = app.clone();
+    // Linux: own WebKitWebContext in data_dir. Windows: WebView2 user data folder (both child
+    // webviews share it, hence one WebView2 environment). macOS: ignored, see store id below.
+    let builder = builder.data_directory(data_dir);
+    #[cfg(target_os = "macos")]
+    let builder = builder.data_store_identifier(WEB_PROFILE_STORE_ID);
     builder
-        .data_directory(data_dir)
         .on_page_load(move |_wv, payload| {
             let phase = match payload.event() {
                 PageLoadEvent::Started => "started",
@@ -221,11 +236,35 @@ pub fn go_back(wv: &Webview) -> Result<(), String> {
         use webkit2gtk::WebViewExt;
         wv.with_webview(|pv| pv.inner().go_back()).map_err(|e| e.to_string())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        // TODO(windows/macos): ICoreWebView2::GoBack / WKWebView goBack via with_webview.
+        // WKWebView -goBack (native history; no script runs in the page). Unverified: no Mac.
+        wv.with_webview(|pv| {
+            let view = pv.inner() as *mut objc2::runtime::AnyObject;
+            if !view.is_null() {
+                // SAFETY: with_webview runs on the main thread and `inner()` is the live WKWebView.
+                let _: *mut objc2::runtime::AnyObject = unsafe { objc2::msg_send![view, goBack] };
+            }
+        })
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(windows)]
+    {
+        // ICoreWebView2::GoBack (native history). Unverified: no Windows machine.
+        wv.with_webview(|pv| {
+            // SAFETY: COM calls on the UI thread that owns the controller.
+            unsafe {
+                if let Ok(core) = pv.controller().CoreWebView2() {
+                    let _ = core.GoBack();
+                }
+            }
+        })
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
         let _ = wv;
-        Err("back is not implemented on this platform yet".into())
+        Err("back is not implemented on this platform".into())
     }
 }
 

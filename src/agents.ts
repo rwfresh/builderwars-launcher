@@ -82,9 +82,35 @@ export function quoteArg(arg: string, kind: ShellKind): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-export function buildCommand(agent: AgentId, prompt: string, kind: ShellKind): string {
+/** Quote a directory for `cd`, using `~/...` when it is under home and needs no quoting (readable). */
+export function quoteDir(dir: string, kind: ShellKind, home?: string): string {
+  if (kind !== "powershell" && home) {
+    const h = home.replace(/\/+$/, "");
+    if (dir === h) return "~";
+    if (dir.startsWith(`${h}/`)) {
+      const rest = dir.slice(h.length + 1);
+      if (POSIX_SAFE.test(rest)) return `~/${rest}`;
+    }
+  }
+  return quoteArg(dir, kind);
+}
+
+/** `cd <dir> && ` (or the PowerShell equivalent) so the agent starts in the work directory. */
+export function cdPrefix(dir: string, kind: ShellKind, home?: string): string {
+  if (kind === "powershell") return `Set-Location -LiteralPath ${quoteArg(dir, kind)}; `;
+  // `&&` works in sh/bash/zsh and fish >= 3.0.
+  return `cd ${quoteDir(dir, kind, home)} && `;
+}
+
+export function buildCommand(
+  agent: AgentId,
+  prompt: string,
+  kind: ShellKind,
+  opts: { cwd?: string; home?: string } = {},
+): string {
   const argv = agentArgv(agent, sanitizePrompt(prompt));
-  return argv.map((a, i) => (i === 0 ? a : quoteArg(a, kind))).join(" ");
+  const line = argv.map((a, i) => (i === 0 ? a : quoteArg(a, kind))).join(" ");
+  return opts.cwd ? cdPrefix(opts.cwd, kind, opts.home) + line : line;
 }
 
 /**

@@ -13,6 +13,8 @@ export interface Settings {
   useHerdr: boolean | null;
   grokUrl: string;
   siteUrl: string;
+  /** null = default (~/BuilderWars). */
+  workDir: string | null;
 }
 
 export interface LauncherInfo {
@@ -20,6 +22,9 @@ export interface LauncherInfo {
   settings: Settings;
   siteUrl: string;
   siteOrigin: string;
+  /** Resolved, existing work directory. */
+  workDir: string;
+  home: string;
   autotest: boolean;
 }
 
@@ -54,4 +59,6 @@ export const paneBounds = (pane: ChildPane, r: { x: number; y: number; width: nu
 export const paneNav = (pane: ChildPane, action: "back" | "reload" | "go", url?: string) =>
   invoke<void>("pane_nav", { pane, action, url: url ?? null });
 export const paneFocus = (pane: "terminal" | ChildPane) => invoke<void>("pane_focus", { pane });
+export const pickWorkDir = () => invoke<string | null>("pick_work_dir");
+export const deeplinkTake = () => invoke<unknown>("deeplink_take");
 export const bridgeResolve = (id: number, ok: boolean, value: string) => invoke<void>("bridge_resolve", { id, ok, value });

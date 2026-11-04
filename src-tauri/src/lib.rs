@@ -1,4 +1,5 @@
 mod bridge;
+mod deeplink;
 mod envinfo;
 mod herdr;
 mod panes;
@@ -15,13 +16,30 @@ use std::sync::Mutex;
 use tauri::ipc::{CapabilityBuilder, Channel};
 use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewUrl};
+use std::path::PathBuf;
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewUrl};
+#[cfg(target_os = "linux")]
+use tauri::Emitter;
+use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_dialog::DialogExt;
 
 pub struct AppState {
     env: EnvInfo,
     site_url: String,
     site_origin: String,
+    home: PathBuf,
     settings: Mutex<Settings>,
+}
+
+impl AppState {
+    /// The agents' work directory, created on demand; falls back to home if it cannot be created.
+    fn work_dir(&self) -> PathBuf {
+        let dir = settings::work_dir(&self.settings.lock().unwrap(), &self.home);
+        settings::ensure_work_dir(&dir).unwrap_or_else(|e| {
+            eprintln!("[launcher] work dir: {e}; using home");
+            self.home.clone()
+        })
+    }
 }
 
 /// Every command except run_prompt/open_x is for the shell UI only. The ACL already restricts
@@ -38,17 +56,25 @@ struct LauncherInfo {
     settings: Settings,
     site_url: String,
     site_origin: String,
+    work_dir: String,
+    home: String,
     autotest: bool,
 }
 
 #[tauri::command]
 fn launcher_info(webview: Webview, state: State<'_, AppState>) -> Result<LauncherInfo, String> {
     require_shell(&webview)?;
+    // Separate statements: a lock guard temporary inside the struct literal would live until the
+    // end of the expression and deadlock with work_dir()'s lock.
+    let settings = state.settings.lock().unwrap().clone();
+    let work_dir = state.work_dir();
     Ok(LauncherInfo {
         env: state.env.clone(),
-        settings: state.settings.lock().unwrap().clone(),
+        settings,
         site_url: state.site_url.clone(),
         site_origin: state.site_origin.clone(),
+        work_dir: work_dir.to_string_lossy().into_owned(),
+        home: state.home.to_string_lossy().into_owned(),
         autotest: std::env::var("BW_AUTOTEST").is_ok_and(|v| v == "1"),
     })
 }
@@ -70,15 +96,53 @@ fn settings_set(app: AppHandle, webview: Webview, state: State<'_, AppState>, se
     if let Some(a) = &settings.default_agent {
         bridge::validate_agent(a)?;
     }
+    if settings.work_dir.as_deref().is_some_and(|d| !d.trim().is_empty()) {
+        let dir = settings::work_dir(&settings, &state.home);
+        if !dir.is_absolute() {
+            return Err("work directory must be an absolute path (or start with ~/)".into());
+        }
+        settings::ensure_work_dir(&dir)?;
+    }
     settings::save(&app, &settings)?;
     *state.settings.lock().unwrap() = settings;
     Ok(())
 }
 
+/// Shell-only: native folder picker for the work directory; saves the setting. None = cancelled.
 #[tauri::command]
-fn pty_spawn(webview: Webview, pty: State<'_, PtyState>, mode: String, cols: u16, rows: u16, on_event: Channel<PtyEvent>) -> Result<u32, String> {
+async fn pick_work_dir(app: AppHandle, webview: Webview) -> Result<Option<String>, String> {
     require_shell(&webview)?;
-    let r = pty.spawn(&mode, cols.max(2), rows.max(2), on_event);
+    let state = app.state::<AppState>();
+    let current = state.work_dir();
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Builder Wars work directory")
+        .set_directory(&current)
+        .blocking_pick_folder();
+    let Some(picked) = picked else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let dir = settings::ensure_work_dir(&path)?;
+    let mut s = state.settings.lock().unwrap().clone();
+    s.work_dir = Some(dir.to_string_lossy().into_owned());
+    settings::save(&app, &s)?;
+    *state.settings.lock().unwrap() = s;
+    Ok(Some(dir.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn pty_spawn(
+    webview: Webview,
+    pty: State<'_, PtyState>,
+    state: State<'_, AppState>,
+    mode: String,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<PtyEvent>,
+) -> Result<u32, String> {
+    require_shell(&webview)?;
+    let cwd = state.work_dir();
+    let r = pty.spawn(&mode, cols.max(2), rows.max(2), &cwd, on_event);
     println!("[pty] spawn mode={mode} {cols}x{rows} -> {r:?}");
     r
 }
@@ -109,9 +173,10 @@ fn pty_is_idle(webview: Webview, pty: State<'_, PtyState>, id: u32) -> Result<bo
 }
 
 #[tauri::command]
-async fn herdr_dispatch(webview: Webview, command: String) -> Result<herdr::Dispatch, String> {
+async fn herdr_dispatch(webview: Webview, state: State<'_, AppState>, command: String) -> Result<herdr::Dispatch, String> {
     require_shell(&webview)?;
-    tauri::async_runtime::spawn_blocking(move || herdr::dispatch(&command))
+    let cwd = state.work_dir();
+    tauri::async_runtime::spawn_blocking(move || herdr::dispatch(&command, &cwd))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -209,6 +274,9 @@ fn autotest_bridge(app: &AppHandle) {
             std::thread::sleep(std::time::Duration::from_secs(4));
             panes::debug_snapshot(&app, dir);
         }
+        // The shell's autotest answers the confirmation later; read the site's result again.
+        std::thread::sleep(std::time::Duration::from_secs(12));
+        let _ = game.eval_with_callback("JSON.stringify(window.__bwTest)", |r| println!("[autotest] game bridge result (after confirm) {r}"));
     });
 }
 
@@ -225,8 +293,19 @@ pub fn run() {
     let env = envinfo::detect();
 
     tauri::Builder::default()
+        // Must be the first plugin. A second launch (e.g. a builderwars:// link opened from the
+        // browser) is forwarded here; with the `deep-link` feature the URL reaches on_open_url.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(PtyState::default())
         .manage(Bridge::default())
+        .manage(deeplink::DeepLinks::default())
         .invoke_handler(tauri::generate_handler![
             launcher_info,
             debug_log,
@@ -240,6 +319,8 @@ pub fn run() {
             pane_bounds,
             pane_nav,
             pane_focus,
+            pick_work_dir,
+            deeplink::deeplink_take,
             bridge::bridge_resolve,
             bridge::run_prompt,
             bridge::open_x,
@@ -320,7 +401,27 @@ pub fn run() {
             }
             let _ = &shell;
 
-            app.manage(AppState { env: env.clone(), site_url, site_origin, settings: Mutex::new(settings) });
+            let home = settings::home_dir();
+            let state = AppState { env: env.clone(), site_url, site_origin, home, settings: Mutex::new(settings) };
+            println!("[launcher] work dir {}", state.work_dir().display());
+            app.manage(state);
+
+            // Deep links. Bundled builds register the scheme at install time (deb/rpm .desktop
+            // MimeType, MSI/NSIS registry, macOS Info.plist). AppImage and dev builds register at
+            // runtime: always for AppImage, opt-in for dev (BW_REGISTER_DEEPLINK=1) because it
+            // writes a .desktop file / registry key pointing at the dev binary.
+            #[cfg(any(target_os = "linux", windows))]
+            if std::env::var_os("APPIMAGE").is_some() || std::env::var_os("BW_REGISTER_DEEPLINK").is_some() {
+                if let Err(e) = app.deep_link().register_all() {
+                    eprintln!("[deeplink] register failed: {e}");
+                }
+            }
+            let h = handle.clone();
+            app.deep_link().on_open_url(move |event| deeplink::handle_urls(&h, event.urls()));
+            // Cold start: the link that launched us (argv on Linux/Windows, Apple event on macOS).
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                deeplink::handle_urls(&handle, urls);
+            }
 
             if std::env::var("BW_AUTOTEST").is_ok_and(|v| v == "1") {
                 autotest_bridge(&handle);

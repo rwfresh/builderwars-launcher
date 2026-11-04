@@ -11,6 +11,8 @@ const COMMANDS: &[&str] = &[
     "pane_bounds",
     "pane_nav",
     "pane_focus",
+    "pick_work_dir",
+    "deeplink_take",
     "bridge_resolve",
     "run_prompt",
     "open_x",

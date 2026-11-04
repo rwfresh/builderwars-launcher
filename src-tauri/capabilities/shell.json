@@ -17,6 +17,8 @@
     "allow-pane-bounds",
     "allow-pane-nav",
     "allow-pane-focus",
+    "allow-pick-work-dir",
+    "allow-deeplink-take",
     "allow-bridge-resolve"
   ]
 }

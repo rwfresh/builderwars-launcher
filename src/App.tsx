@@ -1,15 +1,17 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
-import { AGENT_LABELS, buildCommand, chooseAgent, isAgentId, shellKindFromPath } from "./agents";
-import { isXUrl, paneLoadSchema, paneTitleSchema, parseRunPromptEvent, parseSiteUrl } from "./bridge";
+import { AGENT_LABELS, buildCommand, chooseAgent, isAgentId, shellKindFromPath, type AgentId } from "./agents";
+import { isXUrl, paneLoadSchema, paneTitleSchema, parseDeepLinkRequests, parseRunPromptEvent, parseSiteUrl } from "./bridge";
 import { ChildPanePlaceholder } from "./ChildPane";
 import {
   bridgeResolve,
   debugLog,
+  deeplinkTake,
   herdrDispatch,
   launcherInfo,
   paneFocus,
   paneNav,
+  pickWorkDir,
   saveSettings,
   type ChildPane,
   type LauncherInfo,
@@ -25,6 +27,24 @@ interface PaneInfo {
 }
 
 const X_HOME = "https://x.com/home";
+
+/** A prompt waiting for the player's OK (from the site bridge or a builderwars:// link). */
+interface PendingRun {
+  key: number;
+  source: "site" | "deeplink";
+  agent: AgentId;
+  prompt: string;
+  /** run_prompt request id to answer (site only). */
+  bridgeId?: number;
+}
+
+let pendingKey = 0;
+
+/** Show a path with ~ for the home directory. */
+function tildify(path: string, home: string): string {
+  const h = home.replace(/[\\/]+$/, "");
+  return path === h ? "~" : path.startsWith(h + "/") || path.startsWith(h + "\\") ? `~${path.slice(h.length)}` : path;
+}
 
 export function App() {
   const [info, setInfo] = useState<LauncherInfo | null>(null);
@@ -53,6 +73,11 @@ function Shell({ info }: { info: LauncherInfo }) {
   });
   const [xMode, setXMode] = useState<"home" | "grok">("home");
   const [manualPrompt, setManualPrompt] = useState("");
+  const [workDir, setWorkDir] = useState(info.workDir);
+  const [queue, setQueue] = useState<PendingRun[]>([]);
+  const [allowSiteSession, setAllowSiteSession] = useState(false);
+  const siteHost = new URL(info.siteUrl).host;
+  const confirm = queue[0] ?? null;
   const term = useRef<TerminalHandle>(null);
   const defaultAgent = chooseAgent(null, settings.defaultAgent, env.agents);
 
@@ -69,7 +94,7 @@ function Shell({ info }: { info: LauncherInfo }) {
     async ({ agent, prompt }: { agent?: string | null; prompt: string }): Promise<string> => {
       const choice = chooseAgent(agent, settings.defaultAgent, env.agents);
       if ("error" in choice) throw new Error(choice.error);
-      const line = buildCommand(choice.agent, prompt, shellKind);
+      const line = buildCommand(choice.agent, prompt, shellKind, { cwd: workDir, home: info.home });
       if (useHerdr) {
         const r = await herdrDispatch(line);
         setStatus(`${AGENT_LABELS[choice.agent]} started in herdr pane ${r.paneId}${r.split ? " (new split)" : ""}`);
@@ -84,7 +109,59 @@ function Shell({ info }: { info: LauncherInfo }) {
       setLayout((l) => toggleCollapsed(l, "terminal", false));
       return choice.agent;
     },
-    [settings.defaultAgent, env.agents, shellKind, useHerdr],
+    [settings.defaultAgent, env.agents, shellKind, useHerdr, workDir, info.home],
+  );
+
+  /** Run a confirmed request and answer the site if it came from the bridge. */
+  const execute = useCallback(
+    (req: PendingRun) => {
+      runPrompt({ agent: req.agent, prompt: req.prompt }).then(
+        (agent) => (req.bridgeId != null ? bridgeResolve(req.bridgeId, true, agent) : undefined),
+        (e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          setStatus(`run prompt failed: ${msg}`);
+          return req.bridgeId != null ? bridgeResolve(req.bridgeId, false, msg) : undefined;
+        },
+      );
+    },
+    [runPrompt],
+  );
+
+  const decide = useCallback(
+    (req: PendingRun, run: boolean, alwaysAllowSite = false) => {
+      setQueue((q) => q.filter((r) => r.key !== req.key));
+      if (alwaysAllowSite && req.source === "site") setAllowSiteSession(true);
+      if (run) {
+        execute(req);
+      } else {
+        setStatus("prompt cancelled");
+        if (req.bridgeId != null) void bridgeResolve(req.bridgeId, false, "Cancelled");
+      }
+    },
+    [execute],
+  );
+
+  /** Queue a request from outside the shell UI; it runs only after confirmation. */
+  const enqueue = useCallback(
+    (source: PendingRun["source"], prompt: string, requested: string | null | undefined, bridgeId?: number) => {
+      const choice = chooseAgent(requested, settings.defaultAgent, env.agents);
+      if ("error" in choice) {
+        setStatus(`run prompt failed: ${choice.error}`);
+        if (bridgeId != null) void bridgeResolve(bridgeId, false, choice.error);
+        return;
+      }
+      const req: PendingRun = { key: ++pendingKey, source, agent: choice.agent, prompt, ...(bridgeId != null ? { bridgeId } : {}) };
+      if (source === "site" && allowSiteSession) {
+        execute(req);
+        return;
+      }
+      setQueue((q) => [...q, req]);
+      setSettingsOpen(false);
+      setLayout((l) => toggleCollapsed(l, "terminal", false));
+      setStatus(source === "site" ? `${siteHost} wants to run a prompt; confirm in the terminal pane` : "a builderwars:// link wants to run a prompt; confirm in the terminal pane");
+      void debugLog(`confirm queued source=${source} agent=${choice.agent} chars=${prompt.length}`);
+    },
+    [settings.defaultAgent, env.agents, allowSiteSession, execute, siteHost],
   );
 
   const focusPane = useCallback((p: PaneId) => {
@@ -97,8 +174,8 @@ function Shell({ info }: { info: LauncherInfo }) {
   }, []);
 
   // Bridge + pane events from Rust.
-  const runPromptRef = useRef(runPrompt);
-  runPromptRef.current = runPrompt;
+  const enqueueRef = useRef(enqueue);
+  enqueueRef.current = enqueue;
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const focusedRef = useRef(focused);
@@ -108,16 +185,17 @@ function Shell({ info }: { info: LauncherInfo }) {
       listen("bridge:run-prompt", (ev) => {
         const req = parseRunPromptEvent(ev.payload);
         if (!req) return;
-        setStatus("site asked to run a prompt…");
-        runPromptRef.current({ agent: req.agent ?? null, prompt: req.prompt }).then(
-          (agent) => bridgeResolve(req.id, true, agent),
-          (e: unknown) => {
-            const msg = e instanceof Error ? e.message : String(e);
-            setStatus(`run prompt failed: ${msg}`);
-            return bridgeResolve(req.id, false, msg);
-          },
+        enqueueRef.current("site", req.prompt, req.agent ?? null, req.id);
+      }),
+      listen<number>("bridge:expired", (ev) => {
+        setQueue((q) => q.filter((r) => r.bridgeId !== ev.payload));
+      }),
+      listen("deeplink:pending", () => {
+        void deeplinkTake().then((reqs) =>
+          parseDeepLinkRequests(reqs).forEach((r) => enqueueRef.current("deeplink", r.prompt, r.agent ?? null)),
         );
       }),
+      listen<string>("launcher:notice", (ev) => setStatus(String(ev.payload))),
       listen("pane:load", (ev) => {
         const p = paneLoadSchema.safeParse(ev.payload);
         if (!p.success) return;
@@ -131,8 +209,23 @@ function Shell({ info }: { info: LauncherInfo }) {
       listen("pane:reveal", () => setLayout((l) => toggleCollapsed(l, "xpane", false))),
       listen("focus:cycle", () => focusPane(nextFocus(focusedRef.current, layoutRef.current.collapsed))),
     ];
+    // Links that arrived before we listened (cold start from a builderwars:// link).
+    void deeplinkTake().then((reqs) =>
+      parseDeepLinkRequests(reqs).forEach((r) => enqueueRef.current("deeplink", r.prompt, r.agent ?? null)),
+    );
     return () => unsubs.forEach((u) => void u.then((f) => f()));
   }, [focusPane]);
+
+  // Autotest: answer confirmations by themselves (site -> Cancel, deep link -> Run), late enough
+  // for the Rust side to snapshot the dialog first.
+  useEffect(() => {
+    if (!info.autotest || !confirm) return;
+    const t = setTimeout(() => {
+      void debugLog(`autotest: ${confirm.source === "site" ? "cancel" : "run"} confirmation from ${confirm.source}`);
+      decide(confirm, confirm.source !== "site");
+    }, 14000);
+    return () => clearTimeout(t);
+  }, [info.autotest, confirm, decide]);
 
   // F6 / Ctrl+` cycle focus. On Linux, Rust catches F6 at the GTK window level (so it also works
   // while a child webview has focus) and emits focus:cycle; this handler covers the other platforms.
@@ -226,8 +319,18 @@ function Shell({ info }: { info: LauncherInfo }) {
             </button>
           </header>
           <div className="term-wrap">
-            <Terminal ref={term} mode={useHerdr ? "herdr" : "shell"} visible={!settingsOpen} onFocus={() => setFocused("terminal")} />
-            {settingsOpen && (
+            <Terminal ref={term} mode={useHerdr ? "herdr" : "shell"} visible={!settingsOpen && !confirm} onFocus={() => setFocused("terminal")} />
+            {confirm && (
+              <ConfirmPanel
+                key={confirm.key}
+                req={confirm}
+                siteHost={siteHost}
+                workDir={tildify(workDir, info.home)}
+                queued={queue.length - 1}
+                onDecide={(run, always) => decide(confirm, run, always)}
+              />
+            )}
+            {settingsOpen && !confirm && (
               <SettingsPanel
                 info={info}
                 settings={settings}
@@ -236,6 +339,8 @@ function Shell({ info }: { info: LauncherInfo }) {
                   await saveSettings(s);
                   const siteChanged = s.siteUrl !== settings.siteUrl;
                   setSettings(s);
+                  const fresh = await launcherInfo();
+                  setWorkDir(fresh.workDir);
                   setSettingsOpen(false);
                   setStatus(siteChanged ? "saved; restart the launcher to use the new site URL" : "settings saved");
                 }}
@@ -280,6 +385,29 @@ function Shell({ info }: { info: LauncherInfo }) {
               </button>
               <button className="btn" title="Cycle focus (F6)" onClick={() => focusPane(nextFocus(focused, layout.collapsed))}>
                 F6 ⇄
+              </button>
+            </div>
+            <div className="row">
+              <span className="field" title={workDir}>
+                DIR <span className="dir">{tildify(workDir, info.home)}</span>
+              </span>
+              <button
+                className="btn"
+                title="Directory your agents start in"
+                onClick={() =>
+                  pickWorkDir().then(
+                    (d) => {
+                      if (d) {
+                        setWorkDir(d);
+                        setSettings((s) => ({ ...s, workDir: d }));
+                        setStatus(`agents now start in ${tildify(d, info.home)}`);
+                      }
+                    },
+                    (e: unknown) => setStatus(`error: ${String(e)}`),
+                  )
+                }
+              >
+                CHANGE
               </button>
             </div>
             <form
@@ -422,6 +550,14 @@ function SettingsPanel({
         </select>
       </label>
       <label>
+        Work directory (agents start here; empty = ~/BuilderWars)
+        <input
+          value={draft.workDir ?? ""}
+          placeholder="~/BuilderWars"
+          onChange={(e) => setDraft({ ...draft, workDir: e.target.value.trim() === "" ? null : e.target.value })}
+        />
+      </label>
+      <label>
         Grok chat URL
         <input value={draft.grokUrl} onChange={(e) => setDraft({ ...draft, grokUrl: e.target.value })} />
       </label>
@@ -442,6 +578,60 @@ function SettingsPanel({
           SAVE
         </button>
         <button className="btn" onClick={onClose}>
+          CANCEL
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmPanel({
+  req,
+  siteHost,
+  workDir,
+  queued,
+  onDecide,
+}: {
+  req: PendingRun;
+  siteHost: string;
+  workDir: string;
+  queued: number;
+  onDecide: (run: boolean, alwaysAllowSite: boolean) => void;
+}) {
+  const [always, setAlways] = useState(false);
+  const runRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => runRef.current?.focus(), []);
+  return (
+    <div className="settings confirm" role="alertdialog" aria-label="Run prompt?">
+      <h2>RUN PROMPT?</h2>
+      <p className="muted">
+        {req.source === "site" ? (
+          <>
+            <b className="amber-text">{siteHost}</b> asks to start an agent in your terminal.
+          </>
+        ) : (
+          <>
+            A <b className="amber-text">builderwars://</b> link (opened by a web page or another app) asks to start an agent in your
+            terminal.
+          </>
+        )}
+      </p>
+      <p>
+        AGENT <b>{AGENT_LABELS[req.agent]}</b> · DIR <b>{workDir}</b>
+        {queued > 0 ? <span className="muted"> · {queued} more waiting</span> : null}
+      </p>
+      <pre className="prompt-text">{req.prompt}</pre>
+      {req.source === "site" && (
+        <label className="check-row">
+          <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />
+          Always allow prompts from {siteHost} this session
+        </label>
+      )}
+      <div className="row">
+        <button ref={runRef} className="btn amber" onClick={() => onDecide(true, always)}>
+          RUN ▸
+        </button>
+        <button className="btn" onClick={() => onDecide(false, false)}>
           CANCEL
         </button>
       </div>
