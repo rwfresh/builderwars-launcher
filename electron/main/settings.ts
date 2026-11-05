@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { DEFAULT_SETTINGS, type Settings } from "../shared/contract";
+import { DEFAULT_SETTINGS, THEME_IDS, type Settings } from "../shared/contract";
 
 export const DEFAULT_SITE_URL = DEFAULT_SETTINGS.siteUrl;
 export const DEFAULT_WORK_DIR_NAME = "BuilderWars";
@@ -15,7 +15,7 @@ This folder was created by the Builder Wars launcher. Your AI agent (Claude Code
 Grok, opencode) starts here when you press "Run in terminal" on builderwars.ai, so promo video
 drafts, spec sheets and renders for your Builder Wars products live here.
 
-Change it in the launcher toolbar (DIR > change). Deleting this folder is safe; the launcher
+Change it in the launcher toolbar (the folder under the terminal > Change). Deleting this folder is safe; the launcher
 recreates it (empty) the next time it starts with the default setting.
 `;
 
@@ -26,6 +26,7 @@ export const settingsSchema = z.object({
   grokUrl: z.string().default(DEFAULT_SETTINGS.grokUrl),
   siteUrl: z.string().default(DEFAULT_SETTINGS.siteUrl),
   workDir: z.string().nullable().default(DEFAULT_SETTINGS.workDir),
+  theme: z.enum(THEME_IDS).default(DEFAULT_SETTINGS.theme),
 });
 
 /** Missing file, bad JSON or wrong types: defaults (like serde's `unwrap_or_default`). */

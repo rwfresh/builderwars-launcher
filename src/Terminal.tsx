@@ -3,6 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { ptyIsIdle, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyMode } from "./ipc";
+import { TERMINAL_THEMES, type ThemeId } from "./themes";
 
 export interface TerminalHandle {
   /** Type a command line + Enter into the PTY. */
@@ -14,28 +15,11 @@ export interface TerminalHandle {
 interface Props {
   mode: PtyMode;
   visible: boolean;
+  theme: ThemeId;
   onFocus?: () => void;
 }
 
-const THEME = {
-  background: "#05080a",
-  foreground: "#c8f7d2",
-  cursor: "#39ff88",
-  cursorAccent: "#05080a",
-  selectionBackground: "#1d4d33",
-  black: "#0b0f12",
-  green: "#39ff88",
-  brightGreen: "#7dffb0",
-  yellow: "#ffb000",
-  brightYellow: "#ffd36b",
-  red: "#ff5c5c",
-  blue: "#5cb8ff",
-  magenta: "#d58cff",
-  cyan: "#4ff0e0",
-  white: "#d8e6dc",
-};
-
-export const Terminal = forwardRef<TerminalHandle, Props>(function Terminal({ mode, visible, onFocus }, ref) {
+export const Terminal = forwardRef<TerminalHandle, Props>(function Terminal({ mode, visible, theme, onFocus }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -43,6 +27,9 @@ export const Terminal = forwardRef<TerminalHandle, Props>(function Terminal({ mo
   const exited = useRef(false);
   const onFocusRef = useRef(onFocus);
   onFocusRef.current = onFocus;
+  // Read once when the terminal is created; later theme changes are applied below without respawning the PTY.
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   useImperativeHandle(ref, () => ({
     async type(line: string) {
@@ -61,7 +48,7 @@ export const Terminal = forwardRef<TerminalHandle, Props>(function Terminal({ mo
     const el = host.current;
     if (!el) return;
     const t = new XTerm({
-      theme: THEME,
+      theme: TERMINAL_THEMES[themeRef.current],
       fontFamily: '"JetBrains Mono", "JetBrainsMono Nerd Font", "Fira Code", ui-monospace, monospace',
       fontSize: 13,
       cursorBlink: false, // a blinking cursor keeps the webview repainting (idle CPU)
@@ -139,6 +126,10 @@ export const Terminal = forwardRef<TerminalHandle, Props>(function Terminal({ mo
       t.dispose();
     };
   }, [mode]);
+
+  useEffect(() => {
+    if (term.current) term.current.options.theme = TERMINAL_THEMES[theme];
+  }, [theme]);
 
   useEffect(() => {
     if (visible) {
