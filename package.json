@@ -1,6 +1,6 @@
 {
   "name": "@builderwars/launcher",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "productName": "Builder Wars",
   "description": "Builder Wars desktop launcher",
   "license": "Apache-2.0",
