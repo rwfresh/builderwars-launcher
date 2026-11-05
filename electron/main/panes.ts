@@ -53,6 +53,8 @@ export interface PanesDeps {
   gameStartUrl: string;
   gamePreload: string;
   bridgeConfig: GameBridgeConfig;
+  /** Shown before a page has painted (the shell theme's background). */
+  background: string;
   send<E extends ShellEventName>(event: E, payload: ShellEventPayloads[E]): void;
   /** F6 pressed in a pane: the shell cycles focus. */
   onF6(wc: WebContents): void;
@@ -84,7 +86,7 @@ export class Panes {
       ["game", this.game],
       ["xpane", this.xpane],
     ] as const) {
-      view.setBackgroundColor("#05080a");
+      view.setBackgroundColor(d.background);
       view.setVisible(false);
       d.win.contentView.addChildView(view);
       this.wire(pane, view.webContents);
@@ -93,6 +95,12 @@ export class Panes {
 
   view(pane: ChildPane): WebContentsView {
     return pane === "game" ? this.game : this.xpane;
+  }
+
+  /** Theme changed: the color shown behind a page that has not painted yet. Pages themselves are untouched. */
+  setBackground(color: string): void {
+    this.game.setBackgroundColor(color);
+    this.xpane.setBackgroundColor(color);
   }
 
   start(): void {

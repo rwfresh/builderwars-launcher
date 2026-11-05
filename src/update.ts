@@ -25,7 +25,7 @@ export type UpdateAction = "restart" | "later" | "download" | "dismiss";
 export interface UpdateBanner {
   text: string;
   actions: UpdateAction[];
-  /** Quiet styling (progress, checking) instead of the amber call to action. */
+  /** Quiet styling (progress, checking) instead of the highlighted call to action. */
   subtle: boolean;
 }
 

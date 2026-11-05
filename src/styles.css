@@ -1,15 +1,74 @@
-:root {
-  --bg: #05080a;
-  --panel: #0a1014;
-  --line: #163024;
-  --green: #39ff88;
-  --green-dim: #1f8a4c;
-  --amber: #ffb000;
-  --text: #c8f7d2;
-  --muted: #6c8f78;
-  --red: #ff5c5c;
-  --mono: "JetBrains Mono", "JetBrainsMono Nerd Font", "Fira Code", ui-monospace, monospace;
+/*
+ * Shell UI styles. X-style look: flat black (or Dim / Light), 1px column lines, pill buttons, Inter for the UI and
+ * JetBrains Mono for the terminal and prompts. The theme is chosen in Settings and set as <html data-theme>;
+ * src/themes.ts holds the matching terminal palettes and electron/shared/contract.ts the window backgrounds.
+ */
+
+:root,
+:root[data-theme="lights-out"] {
+  --bg: #000000;
+  --surface: #16181c;
+  --raised: #202327;
+  --line: #2f3336;
+  --outline: #536471;
+  --text: #e7e9ea;
+  --muted: #7d8389;
+  --placeholder: #8b9095;
+  --hover: rgba(231, 233, 234, 0.1);
+  --btn-bg: #eff3f4;
+  --btn-text: #0f1419;
+  --accent: #1d9bf0;
+  --accent-tint: rgba(29, 155, 240, 0.12);
+  --link: #1d9bf0;
+  --live: #00ba7c;
+  --danger: #f4212e;
   color-scheme: dark;
+}
+
+:root[data-theme="dim"] {
+  --bg: #15202b;
+  --surface: #1e2732;
+  --raised: #273340;
+  --line: #38444d;
+  --outline: #5c6e7e;
+  --text: #f7f9f9;
+  --muted: #8b98a5;
+  --placeholder: #9aa6b2;
+  --hover: rgba(247, 249, 249, 0.1);
+  --btn-bg: #eff3f4;
+  --btn-text: #0f1419;
+  --accent: #1d9bf0;
+  --accent-tint: rgba(29, 155, 240, 0.14);
+  --link: #1d9bf0;
+  --live: #00ba7c;
+  --danger: #f4212e;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f7f9f9;
+  --raised: #eff3f4;
+  --line: #e1e8ed;
+  --outline: #7b8a97;
+  --text: #0f1419;
+  --muted: #536471;
+  --placeholder: #536471;
+  --hover: rgba(15, 20, 25, 0.06);
+  --btn-bg: #0f1419;
+  --btn-text: #ffffff;
+  --accent: #1d9bf0;
+  --accent-tint: rgba(29, 155, 240, 0.1);
+  --link: #1270b8;
+  --live: #00805a;
+  --danger: #d0141f;
+  color-scheme: light;
+}
+
+:root {
+  --ui: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "JetBrains Mono", "JetBrainsMono Nerd Font", "Fira Code", ui-monospace, monospace;
+  --pill: 9999px;
 }
 
 * {
@@ -23,9 +82,11 @@ body,
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--ui);
+  font-size: 14px;
+  line-height: 1.35;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 body.dragging {
@@ -33,14 +94,25 @@ body.dragging {
   user-select: none;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .boot {
   display: grid;
   place-items: center;
   height: 100%;
-  color: var(--green);
-  letter-spacing: 0.3em;
-  text-shadow: 0 0 8px rgba(57, 255, 136, 0.5);
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 500;
 }
+
+.boot.err {
+  color: var(--danger);
+}
+
+/* Columns: flat panes separated by a 1px line drawn inside each divider. */
 
 .shell {
   display: grid;
@@ -49,169 +121,371 @@ body.dragging {
 }
 
 .col {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--line);
-  background: var(--panel);
+  background: var(--bg);
 }
 
-.col.focused {
-  border-color: var(--green-dim);
+.divider {
+  cursor: col-resize;
+  touch-action: none;
+  background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat;
 }
+
+.divider:hover {
+  background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat;
+}
+
+/* Pane header: bold name over a muted subtitle, round icon buttons on the right. */
 
 .pane-head {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  flex: 0 0 30px;
-  padding: 0 6px;
+  gap: 2px;
+  height: 52px;
+  flex: 0 0 52px;
+  padding: 0 6px 0 16px;
   border-bottom: 1px solid var(--line);
-  background: #070c0f;
 }
 
-.tag {
-  color: var(--bg);
-  background: var(--green);
-  padding: 1px 6px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+/* Focused pane: a short accent bar under the name, like X's active tab. */
+.col.focused .pane-head::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  bottom: -1px;
+  width: 56px;
+  height: 4px;
+  border-radius: var(--pill);
+  background: var(--accent);
 }
 
-.tag.amber {
-  background: var(--amber);
+.pane-heading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  margin-right: 6px;
+}
+
+.pane-name {
+  font-size: 17px;
+  line-height: 20px;
+  font-weight: 800;
 }
 
 .pane-title {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 16px;
   color: var(--muted);
 }
 
+/* Buttons. */
+
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
   font: inherit;
-  color: var(--green);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
   background: transparent;
-  border: 1px solid var(--green-dim);
-  padding: 2px 8px;
+  border: 1px solid var(--outline);
+  border-radius: var(--pill);
   cursor: pointer;
-  letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
 .btn:hover {
-  background: rgba(57, 255, 136, 0.08);
-  box-shadow: 0 0 6px rgba(57, 255, 136, 0.25);
+  background: var(--hover);
 }
 
-.btn:disabled {
-  opacity: 0.4;
+.btn.primary {
+  color: var(--btn-text);
+  background: var(--btn-bg);
+  border-color: transparent;
+}
+
+.btn.primary:hover {
+  background: var(--btn-bg);
+  filter: brightness(0.9);
+}
+
+.btn.small {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.btn:disabled,
+.icon-btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
+  filter: none;
 }
 
-.btn.amber {
-  color: var(--amber);
-  border-color: #8a6000;
+.icon-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
 }
+
+.icon-btn:hover,
+.icon-btn[aria-pressed="true"] {
+  background: var(--hover);
+}
+
+.icon-btn[aria-pressed="true"] {
+  color: var(--link);
+}
+
+kbd {
+  font-family: var(--ui);
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+/* Terminal column. */
 
 .term-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: 4px 0 0 6px;
   background: var(--bg);
 }
 
 .term-host {
   position: absolute;
-  inset: 4px 0 0 6px;
+  inset: 10px 4px 0 14px;
+}
+
+.xterm .xterm-viewport {
+  background-color: var(--bg) !important;
 }
 
 .toolbar {
   flex: 0 0 auto;
-  border-top: 1px solid var(--line);
-  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  background: #070c0f;
+  gap: 10px;
+  padding: 10px 12px 10px;
+  border-top: 1px solid var(--line);
 }
 
 .row {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
   flex-wrap: wrap;
 }
 
+.spacer {
+  flex: 1;
+}
+
 .field {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
   color: var(--muted);
+  font-size: 13px;
+}
+
+.field.check {
+  color: var(--text);
+  cursor: pointer;
 }
 
 .field.disabled {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dir-field {
+  flex: 1;
+  color: var(--muted);
+}
+
+.dir {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 select,
 input {
   font: inherit;
+  font-size: 14px;
   color: var(--text);
   background: var(--bg);
-  border: 1px solid var(--line);
-  padding: 3px 6px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  height: 36px;
+  padding: 0 10px;
 }
 
-input[type="checkbox"] {
-  accent-color: var(--green);
+select {
+  padding-right: 6px;
+  cursor: pointer;
 }
 
-input.prompt {
-  flex: 1;
-  min-width: 120px;
+.toolbar select {
+  height: 32px;
+  border-radius: var(--pill);
+  padding: 0 8px 0 12px;
+  font-weight: 600;
+}
+
+input::placeholder {
+  color: var(--placeholder);
 }
 
 select:focus,
 input:focus {
-  outline: 1px solid var(--green-dim);
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: inherit;
+}
+
+input[type="checkbox"]:focus {
+  box-shadow: none;
+}
+
+/* Prompt box: X's search pill with a round send button. */
+
+.prompt-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 4px 0 16px;
+  border-radius: var(--pill);
+  background: var(--raised);
+  border: 1px solid transparent;
+}
+
+.prompt-box:focus-within {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+
+.prompt-box input.prompt {
+  flex: 1;
+  min-width: 80px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.prompt-box input.prompt:focus {
+  box-shadow: none;
+}
+
+.send {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--btn-text);
+  background: var(--btn-bg);
+  cursor: pointer;
+}
+
+.send:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .status {
-  color: var(--amber);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--muted);
   white-space: nowrap;
+}
+
+.status-text {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.divider {
-  cursor: col-resize;
-  background: var(--bg);
-  touch-action: none;
+.status-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--live);
 }
 
-.divider:hover {
-  background: var(--green-dim);
-}
+/* Collapsed pane: a slim clickable strip with the vertical name. */
 
 .strip {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--green);
+  border: 0;
+  background: var(--bg);
+  color: var(--muted);
   cursor: pointer;
-  padding: 0;
+  padding: 12px 0;
   font: inherit;
-  letter-spacing: 0.3em;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.strip:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 .strip span {
   writing-mode: vertical-rl;
 }
+
+/* Web pane slots (the WebContentsViews are laid over these). */
 
 .child-slot {
   flex: 1;
@@ -228,98 +502,140 @@ input:focus {
   color: var(--muted);
 }
 
+/* Settings and the prompt confirmation take over the terminal column. */
+
 .settings {
   position: absolute;
   inset: 0;
   overflow: auto;
-  padding: 12px;
-  background: var(--panel);
+  padding: 16px 16px 20px;
+  background: var(--bg);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
 }
 
 .settings h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
-  color: var(--green);
-  font-size: 13px;
-  letter-spacing: 0.3em;
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 800;
 }
 
 .settings label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  font-size: 13px;
   color: var(--muted);
+}
+
+.settings p {
+  margin: 0;
+  line-height: 20px;
+}
+
+/* Save / Cancel stay reachable while the settings scroll. */
+.settings .actions {
+  position: sticky;
+  bottom: -20px;
+  margin: auto -16px -20px;
+  padding: 12px 16px 16px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+.confirm {
+  inset: 10px;
+  border: 1px solid var(--outline);
+  border-radius: 16px;
+  background: var(--bg);
+}
+
+.confirm h2 svg {
+  color: var(--link);
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.facts b {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .muted {
   color: var(--muted);
 }
 
-.err {
-  color: var(--red);
-}
-
-.xterm .xterm-viewport {
-  background-color: var(--bg) !important;
-}
-
-.dir {
+.strong {
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 260px;
+  font-weight: 700;
 }
 
-.confirm {
-  border: 1px solid #8a6000;
-  box-shadow: inset 0 0 24px rgba(255, 176, 0, 0.08);
-}
-
-.confirm h2 {
-  color: var(--amber);
-}
-
-.amber-text {
-  color: var(--amber);
+.err {
+  color: var(--danger);
 }
 
 .prompt-text {
   margin: 0;
-  padding: 8px;
+  padding: 12px 14px;
   max-height: 50vh;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  background: var(--raised);
+  border-radius: 12px;
   color: var(--text);
-  font: inherit;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .settings .check-row {
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  font-size: 14px;
   color: var(--text);
+  cursor: pointer;
 }
+
+.settings-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Update banner above the status line. */
 
 .update-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
-  border: 1px solid #8a6000;
-  color: var(--amber);
-  box-shadow: inset 0 0 12px rgba(255, 176, 0, 0.08);
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 12px;
+  background: var(--accent-tint);
+  color: var(--text);
+  font-size: 13px;
 }
 
 .update-bar.subtle {
-  border-color: var(--line);
+  background: transparent;
+  border: 1px solid var(--line);
   color: var(--muted);
-  box-shadow: none;
 }
 
 .update-text {
@@ -328,12 +644,4 @@ input:focus {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.settings-section {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  color: var(--muted);
 }

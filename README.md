@@ -66,7 +66,7 @@ window.builderwarsLauncher = {
 
 How a prompt runs: main validates the prompt (non-empty, at most 16,000 chars, no NUL) and the agent id, then sends it to the shell UI, which owns the terminal. The shell chooses the agent and **asks the player to confirm**. On Run it quotes the prompt and types the command (or dispatches it through herdr), then answers through `bridge:resolve`, which resolves the site's promise.
 
-**Confirmation.** Every prompt from the site or from a deep link opens a "RUN PROMPT?" panel in the terminal column (never over the web panes). The panel shows where the request came from, the agent, the work directory and the full prompt, with [Run] and [Cancel]. Cancel rejects the site's promise with `Error("Cancelled")`. For site prompts there is also an "Always allow prompts from builderwars.ai this session" checkbox, held in memory only. Deep links always ask. Several requests queue up. If the player never answers, the site's promise rejects after 5 minutes and the panel goes away. Prompts typed into the launcher's own prompt box run without asking.
+**Confirmation.** Every prompt from the site or from a deep link opens a "Run prompt?" panel in the terminal column (never over the web panes). The panel shows where the request came from, the agent, the work directory and the full prompt, with [Run] and [Cancel]. Cancel rejects the site's promise with `Error("Cancelled")`. For site prompts there is also an "Always allow prompts from builderwars.ai this session" checkbox, held in memory only. Deep links always ask. Several requests queue up. If the player never answers, the site's promise rejects after 5 minutes and the panel goes away. Prompts typed into the launcher's own prompt box run without asking.
 
 ## Deep links
 
@@ -77,7 +77,7 @@ How a prompt runs: main validates the prompt (non-empty, at most 16,000 chars, n
 
 ## Agents and herdr
 
-- **Work directory.** Agents start in `~/BuilderWars` by default. The launcher creates it on first run with a README.md explaining what it is for, so Claude Code asks to trust it once. The toolbar shows the current directory, and its CHANGE button opens a native folder picker (Electron `dialog`, called from main). Settings also accept a typed path (`~/` is expanded). The terminal starts there, and every agent command is typed as `cd <dir> && <agent> ...` (`Set-Location -LiteralPath '<dir>'; ...` in PowerShell), so it starts in the right place even after you `cd` elsewhere. New herdr splits open there too.
+- **Work directory.** Agents start in `~/BuilderWars` by default. The launcher creates it on first run with a README.md explaining what it is for, so Claude Code asks to trust it once. The toolbar shows the current directory, and its Change button opens a native folder picker (Electron `dialog`, called from main). Settings also accept a typed path (`~/` is expanded). The terminal starts there, and every agent command is typed as `cd <dir> && <agent> ...` (`Set-Location -LiteralPath '<dir>'; ...` in PowerShell), so it starts in the right place even after you `cd` elsewhere. New herdr splits open there too.
 - On startup the launcher reads `PATH` from your login shell, because desktop launchers often have a minimal one. It then detects `claude`, `codex`, `gemini`, `grok` and `opencode`.
 - Initial-prompt syntax: `claude "<p>"`, `codex "<p>"`, `gemini -i "<p>"`, `grok "<p>"`, `opencode --prompt "<p>"`. Prompts are cleaned (control and escape characters stripped, tabs turned into spaces) and quoted for POSIX shells, fish or PowerShell (`src/agents.ts`).
 - Without herdr, the command is typed only when the shell is idle (the PTY's foreground process group is the shell). Otherwise the site gets "the terminal is busy".
@@ -109,6 +109,7 @@ Each decision is logged as `[pane] new-window <scheme://host> -> popup|navigate-
 
 - The web panes are `WebContentsView`s added on top of the shell renderer. The shell renders placeholder boxes and sends their rectangles through `pane:bounds`. The shell's CSS px equal the window's DIPs, so the rectangles are used as they are, with no scale conversion. A collapsed or tiny pane is hidden with `setVisible(false)`.
 - Views always draw above the shell, so nothing of ours renders inside the pane rectangles. Settings take over the terminal column, and dropdowns live in the left toolbar.
+- **Themes.** Settings > Theme picks Lights out (default, black), Dim (dark blue) or Light, saved as `theme` in `settings.json`. A theme styles only our own UI: the shell (`src/styles.css` tokens under `html[data-theme]`), the terminal palette (`src/themes.ts`) and the window and web-view background shown before a page paints (`THEME_BACKGROUNDS` in `electron/shared/contract.ts`). The game pane and x.com keep their own look; x.com follows the player's X display setting. The UI font is Inter, bundled from `@fontsource-variable/inter` because the shell CSP only allows our own assets; the terminal keeps JetBrains Mono when it is installed.
 - **F6** cycles focus (terminal, game, X). It is caught with `before-input-event` on every webContents, including x.com, so it works whichever pane has focus. Ctrl+` works from the shell.
 - No platform-specific window hacks: the same code positions the views on Linux (Wayland and X11), Windows and macOS.
 
@@ -127,16 +128,16 @@ Packaged builds keep themselves up to date from the public feed, the latest rele
 embedded in the app as `resources/app-update.yml`). The code is `electron/main/updater.ts` (electron-updater) and the
 banner above the terminal's status line.
 
-- **When:** about 10 seconds after startup, then every 4 hours, never two checks at once. SETTINGS > CHECK FOR UPDATES
+- **When:** about 10 seconds after startup, then every 4 hours, never two checks at once. Settings > Check for updates
   checks right away and answers "You're on the latest version (x.y.z)" or the error. Background checks that fail (for
   example offline) are only logged (`[updater]` lines), never shown.
 - **macOS, Windows, Linux AppImage (automatic):** the update downloads in the background (the banner shows the progress),
-  then "Builder Wars x.y.z is ready. [RESTART NOW] [LATER]". Restart installs it and starts the new version. LATER hides
+  then "Builder Wars x.y.z is ready. [Restart now] [Later]". Restart installs it and starts the new version. Later hides
   the banner until the next launch, and the update installs when you quit anyway. macOS installs from the zip
   (Squirrel.Mac), Windows runs the NSIS installer, and the AppImage replaces its own file. An AppImage whose file name
   contains a version (`builderwars-launcher-0.2.0-linux-x86_64.AppImage`) is replaced by a file named for the new
   version; rename it to something without a version (`BuilderWars.AppImage`) to keep one path.
-- **Linux deb and rpm (notify only):** the banner says "Builder Wars x.y.z is available. [DOWNLOAD]", and DOWNLOAD opens
+- **Linux deb and rpm (notify only):** the banner says "Builder Wars x.y.z is available. [Download]", and Download opens
   [builderwars.ai/download](https://builderwars.ai/download) in your browser. The app never installs packages, because
   that needs root (`pkexec`). Update through your package manager or the downloaded package.
 - **Never updated:** unpackaged and dev builds (`pnpm dev`, `pnpm start`, `--linux dir`) don't run the updater and make no

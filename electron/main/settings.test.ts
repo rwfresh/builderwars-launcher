@@ -58,6 +58,17 @@ describe("settings file", () => {
     fs.writeFileSync(file, JSON.stringify({ useHerdr: "yes" }));
     expect(loadSettings(file)).toEqual(DEFAULT_SETTINGS);
   });
+
+  it("defaults the theme to Lights out and keeps a saved one", () => {
+    const file = path.join(tmpDir(), "settings.json");
+    // A settings.json written before themes existed has no theme field.
+    fs.writeFileSync(file, JSON.stringify({ defaultAgent: "claude", workDir: null }));
+    expect(loadSettings(file).theme).toBe("lights-out");
+    saveSettings(file, { ...DEFAULT_SETTINGS, theme: "dim" });
+    expect(loadSettings(file).theme).toBe("dim");
+    fs.writeFileSync(file, JSON.stringify({ theme: "neon" }));
+    expect(loadSettings(file)).toEqual(DEFAULT_SETTINGS);
+  });
 });
 
 describe("site URL", () => {

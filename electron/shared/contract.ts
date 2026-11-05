@@ -25,6 +25,17 @@ export interface EnvInfo {
   herdr: boolean;
 }
 
+/** Shell color themes (src/styles.css, src/themes.ts). They style our own UI only, never the web panes. */
+export const THEME_IDS = ["lights-out", "dim", "light"] as const;
+export type ThemeId = (typeof THEME_IDS)[number];
+
+/** Window and web-view background per theme, shown before a page has painted. Matches `--bg` in src/styles.css. */
+export const THEME_BACKGROUNDS: Record<ThemeId, string> = {
+  "lights-out": "#000000",
+  dim: "#15202b",
+  light: "#ffffff",
+};
+
 export interface Settings {
   defaultAgent: string | null;
   useHerdr: boolean | null;
@@ -32,6 +43,7 @@ export interface Settings {
   siteUrl: string;
   /** null = default (~/BuilderWars). */
   workDir: string | null;
+  theme: ThemeId;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -40,6 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
   grokUrl: "https://x.com/i/grok",
   siteUrl: "https://builderwars.ai",
   workDir: null,
+  theme: "lights-out",
 };
 
 export interface LauncherInfo {

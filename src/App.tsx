@@ -22,8 +22,21 @@ import {
   type Settings,
   type UpdateState,
 } from "./ipc";
+import {
+  IconBack,
+  IconCollapseLeft,
+  IconCollapseRight,
+  IconCycle,
+  IconFolder,
+  IconHome,
+  IconReload,
+  IconSend,
+  IconSettings,
+  IconTerminal,
+} from "./icons";
 import { DEFAULT_LAYOUT, DIVIDER_PX, computeColumns, dragDivider, nextFocus, toggleCollapsed, type LayoutState, type PaneId } from "./layout";
 import { Terminal, type TerminalHandle } from "./Terminal";
+import { THEME_IDS, THEME_LABELS, isThemeId } from "./themes";
 import { parseUpdateState, UPDATE_MODE_LABELS, updateBanner, type UpdateAction } from "./update";
 
 interface PaneInfo {
@@ -58,8 +71,8 @@ export function App() {
   useEffect(() => {
     launcherInfo().then(setInfo, (e: unknown) => setError(String(e)));
   }, []);
-  if (error) return <div className="boot">launcher error: {error}</div>;
-  if (!info) return <div className="boot">BOOTING BUILDER WARS…</div>;
+  if (error) return <div className="boot err">Launcher error: {error}</div>;
+  if (!info) return <div className="boot">Starting Builder Wars…</div>;
   return <Shell info={info} />;
 }
 
@@ -87,6 +100,10 @@ function Shell({ info }: { info: LauncherInfo }) {
   const confirm = queue[0] ?? null;
   const term = useRef<TerminalHandle>(null);
   const defaultAgent = chooseAgent(null, settings.defaultAgent, env.agents);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.theme;
+  }, [settings.theme]);
 
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
@@ -319,18 +336,26 @@ function Shell({ info }: { info: LauncherInfo }) {
     <div className="shell" style={{ gridTemplateColumns: gridTemplate }}>
       {/* LEFT: terminal + toolbar */}
       {layout.collapsed.terminal ? (
-        <CollapsedStrip label="TERMINAL" onExpand={() => collapse("terminal")} />
+        <CollapsedStrip label="Terminal" onExpand={() => collapse("terminal")} />
       ) : (
-        <section className={`col col-left ${focused === "terminal" ? "focused" : ""}`}>
+        <section className={`col col-left ${focused === "terminal" ? "focused" : ""}`} aria-label="Terminal">
           <header className="pane-head">
-            <span className="tag">TERM</span>
-            <span className="pane-title">{useHerdr ? "herdr · session builderwars" : env.shell}</span>
-            <button className="btn" title="Collapse" onClick={() => collapse("terminal")}>
-              ◂
+            <div className="pane-heading">
+              <span className="pane-name">Terminal</span>
+              <span className="pane-title">{useHerdr ? "herdr · session builderwars" : env.shell}</span>
+            </div>
+            <button className="icon-btn" title="Collapse terminal" aria-label="Collapse terminal" onClick={() => collapse("terminal")}>
+              <IconCollapseLeft />
             </button>
           </header>
           <div className="term-wrap">
-            <Terminal ref={term} mode={useHerdr ? "herdr" : "shell"} visible={!settingsOpen && !confirm} onFocus={() => setFocused("terminal")} />
+            <Terminal
+              ref={term}
+              mode={useHerdr ? "herdr" : "shell"}
+              theme={settings.theme}
+              visible={!settingsOpen && !confirm}
+              onFocus={() => setFocused("terminal")}
+            />
             {confirm && (
               <ConfirmPanel
                 key={confirm.key}
@@ -363,7 +388,7 @@ function Shell({ info }: { info: LauncherInfo }) {
           <footer className="toolbar">
             <div className="row">
               <label className="field">
-                AGENT
+                Agent
                 <select
                   value={"agent" in defaultAgent ? defaultAgent.agent : ""}
                   onChange={(e) => {
@@ -391,21 +416,34 @@ function Shell({ info }: { info: LauncherInfo }) {
                     void saveSettings(s);
                   }}
                 />
-                HERDR
+                herdr
               </label>
-              <button className="btn" onClick={() => setSettingsOpen((o) => !o)}>
-                {settingsOpen ? "CLOSE" : "SETTINGS"}
+              <span className="spacer" />
+              <button
+                className="icon-btn"
+                title={settingsOpen ? "Close settings" : "Settings"}
+                aria-label="Settings"
+                aria-pressed={settingsOpen}
+                onClick={() => setSettingsOpen((o) => !o)}
+              >
+                <IconSettings />
               </button>
-              <button className="btn" title="Cycle focus (F6)" onClick={() => focusPane(nextFocus(focused, layout.collapsed))}>
-                F6 ⇄
+              <button
+                className="icon-btn"
+                title="Cycle focus (F6)"
+                aria-label="Cycle focus (F6)"
+                onClick={() => focusPane(nextFocus(focused, layout.collapsed))}
+              >
+                <IconCycle />
               </button>
             </div>
             <div className="row">
-              <span className="field" title={workDir}>
-                DIR <span className="dir">{tildify(workDir, info.home)}</span>
+              <span className="field dir-field" title={workDir}>
+                <IconFolder />
+                <span className="dir">{tildify(workDir, info.home)}</span>
               </span>
               <button
-                className="btn"
+                className="btn small"
                 title="Directory your agents start in"
                 onClick={() =>
                   pickWorkDir().then(
@@ -420,11 +458,11 @@ function Shell({ info }: { info: LauncherInfo }) {
                   )
                 }
               >
-                CHANGE
+                Change
               </button>
             </div>
             <form
-              className="row"
+              className="prompt-box"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!manualPrompt.trim()) return;
@@ -434,14 +472,21 @@ function Shell({ info }: { info: LauncherInfo }) {
                 );
               }}
             >
-              <input className="prompt" placeholder="prompt for your agent…" value={manualPrompt} onChange={(e) => setManualPrompt(e.target.value)} />
-              <button className="btn amber" type="submit">
-                RUN ▸
+              <input
+                className="prompt"
+                placeholder="Prompt your agent…"
+                aria-label="Prompt for your agent"
+                value={manualPrompt}
+                onChange={(e) => setManualPrompt(e.target.value)}
+              />
+              <button className="send" type="submit" title="Run in the terminal" aria-label="Run prompt" disabled={!manualPrompt.trim()}>
+                <IconSend />
               </button>
             </form>
             <UpdateBar state={update} onError={(msg) => setStatus(`update: ${msg}`)} />
-            <div className="status" title={status}>
-              ▌{status}
+            <div className="status" title={status} role="status">
+              <span className="status-dot" aria-hidden="true" />
+              <span className="status-text">{status}</span>
             </div>
           </footer>
         </section>
@@ -451,26 +496,33 @@ function Shell({ info }: { info: LauncherInfo }) {
 
       {/* CENTER: game pane (WebContentsView) */}
       {layout.collapsed.game ? (
-        <CollapsedStrip label="GAME" onExpand={() => collapse("game")} />
+        <CollapsedStrip label="Game" onExpand={() => collapse("game")} />
       ) : (
-        <section className={`col ${focused === "game" ? "focused" : ""}`}>
+        <section className={`col ${focused === "game" ? "focused" : ""}`} aria-label="Game">
           <header className="pane-head">
-            <span className="tag">GAME</span>
-            <button className="btn" title="Back" onClick={() => void paneNav("game", "back")}>
-              ◂
+            <div className="pane-heading">
+              <span className="pane-name">Game</span>
+              <span className="pane-title" title={panes.game.url}>
+                {panes.game.loading ? "Loading… " : ""}
+                {panes.game.title || shortUrl(panes.game.url)}
+              </span>
+            </div>
+            <button className="icon-btn" title="Back" aria-label="Back" onClick={() => void paneNav("game", "back")}>
+              <IconBack />
             </button>
-            <button className="btn" title="Reload" onClick={() => void paneNav("game", "reload")}>
-              ⟳
+            <button className="icon-btn" title="Reload" aria-label="Reload" onClick={() => void paneNav("game", "reload")}>
+              <IconReload />
             </button>
-            <button className="btn" title={`Home: back to ${siteHost}`} onClick={() => void paneNav("game", "go", `${info.siteOrigin}/`)}>
-              HOME
+            <button
+              className="icon-btn"
+              title={`Home: back to ${siteHost}`}
+              aria-label={`Home: back to ${siteHost}`}
+              onClick={() => void paneNav("game", "go", `${info.siteOrigin}/`)}
+            >
+              <IconHome />
             </button>
-            <span className="pane-title" title={panes.game.url}>
-              {panes.game.loading ? "loading… " : ""}
-              {panes.game.title || shortUrl(panes.game.url)}
-            </span>
-            <button className="btn" title="Collapse" onClick={() => collapse("game")}>
-              ▸
+            <button className="icon-btn" title="Collapse game" aria-label="Collapse game" onClick={() => collapse("game")}>
+              <IconCollapseRight />
             </button>
           </header>
           <ChildPanePlaceholder pane="game" label="builderwars.ai" visible={!layout.collapsed.game} />
@@ -483,24 +535,26 @@ function Shell({ info }: { info: LauncherInfo }) {
       {layout.collapsed.xpane ? (
         <CollapsedStrip label="X" onExpand={() => collapse("xpane")} />
       ) : (
-        <section className={`col ${focused === "xpane" ? "focused" : ""}`}>
+        <section className={`col ${focused === "xpane" ? "focused" : ""}`} aria-label="X">
           <header className="pane-head">
-            <span className="tag amber">X</span>
-            <button className="btn" title="Back" onClick={() => void paneNav("xpane", "back")}>
-              ◂
+            <div className="pane-heading">
+              <span className="pane-name">X</span>
+              <span className="pane-title" title={panes.xpane.url}>
+                {panes.xpane.loading ? "Loading… " : ""}
+                {panes.xpane.title || shortUrl(panes.xpane.url || xTarget)}
+              </span>
+            </div>
+            <button className="icon-btn" title="Back" aria-label="Back" onClick={() => void paneNav("xpane", "back")}>
+              <IconBack />
             </button>
-            <button className="btn" title="Reload" onClick={() => void paneNav("xpane", "reload")}>
-              ⟳
+            <button className="icon-btn" title="Reload" aria-label="Reload" onClick={() => void paneNav("xpane", "reload")}>
+              <IconReload />
             </button>
-            <button className="btn" title={`Switch to ${xMode === "home" ? "Grok" : "Home"}`} onClick={toggleXMode}>
-              {xMode === "home" ? "GROK" : "HOME"}
+            <button className="btn small" title={`Switch to ${xMode === "home" ? "Grok" : "Home"}`} onClick={toggleXMode}>
+              {xMode === "home" ? "Grok" : "Home"}
             </button>
-            <span className="pane-title" title={panes.xpane.url}>
-              {panes.xpane.loading ? "loading… " : ""}
-              {panes.xpane.title || shortUrl(panes.xpane.url || xTarget)}
-            </span>
-            <button className="btn" title="Collapse" onClick={() => collapse("xpane")}>
-              ▸
+            <button className="icon-btn" title="Collapse X" aria-label="Collapse X" onClick={() => collapse("xpane")}>
+              <IconCollapseRight />
             </button>
           </header>
           <ChildPanePlaceholder pane="xpane" label="x.com" visible={!layout.collapsed.xpane} />
@@ -532,14 +586,14 @@ function UpdateBar({ state, onError }: { state: UpdateState; onError: (msg: stri
     download: () => void updateOpenDownload().catch(fail),
     dismiss: () => setDismissed(state),
   };
-  const labels: Record<UpdateAction, string> = { restart: "RESTART NOW", later: "LATER", download: "DOWNLOAD", dismiss: "OK" };
+  const labels: Record<UpdateAction, string> = { restart: "Restart now", later: "Later", download: "Download", dismiss: "OK" };
   return (
     <div className={`update-bar ${banner.subtle ? "subtle" : ""}`} role="status">
       <span className="update-text" title={banner.text}>
         {banner.text}
       </span>
       {banner.actions.map((a) => (
-        <button key={a} className={`btn ${a === "restart" || a === "download" ? "amber" : ""}`} onClick={run[a]}>
+        <button key={a} className={`btn small ${a === "restart" || a === "download" ? "primary" : ""}`} onClick={run[a]}>
           {labels[a]}
         </button>
       ))}
@@ -572,7 +626,17 @@ function SettingsPanel({
   }, [draft]);
   return (
     <div className="settings">
-      <h2>SETTINGS</h2>
+      <h2>Settings</h2>
+      <label>
+        Theme
+        <select value={draft.theme} onChange={(e) => isThemeId(e.target.value) && setDraft({ ...draft, theme: e.target.value })}>
+          {THEME_IDS.map((t) => (
+            <option key={t} value={t}>
+              {THEME_LABELS[t]}
+            </option>
+          ))}
+        </select>
+      </label>
       <label>
         Default agent
         <select value={draft.defaultAgent ?? ""} onChange={(e) => setDraft({ ...draft, defaultAgent: e.target.value || null })}>
@@ -616,24 +680,24 @@ function SettingsPanel({
         <span>
           Builder Wars {info.version} · updates {UPDATE_MODE_LABELS[info.updates.mode]}
         </span>
-        <button className="btn" disabled={info.updates.mode === "off" || updateBusy} onClick={onCheckUpdates}>
-          CHECK FOR UPDATES
+        <button className="btn small" disabled={info.updates.mode === "off" || updateBusy} onClick={onCheckUpdates}>
+          Check for updates
         </button>
       </div>
       <p className="muted">
         Active site: {info.siteUrl} · agents on PATH: {info.env.agents.join(", ") || "none"} · shell: {info.env.shell}
       </p>
       {(err ?? valid) && <p className="err">{err ?? valid}</p>}
-      <div className="row">
+      <div className="row actions">
         <button
-          className="btn amber"
+          className="btn primary"
           disabled={valid != null}
           onClick={() => onSave(draft).catch((e: unknown) => setErr(String(e)))}
         >
-          SAVE
+          Save
         </button>
         <button className="btn" onClick={onClose}>
-          CANCEL
+          Cancel
         </button>
       </div>
     </div>
@@ -658,22 +722,30 @@ function ConfirmPanel({
   useEffect(() => runRef.current?.focus(), []);
   return (
     <div className="settings confirm" role="alertdialog" aria-label="Run prompt?">
-      <h2>RUN PROMPT?</h2>
+      <h2>
+        <IconTerminal />
+        Run prompt?
+      </h2>
       <p className="muted">
         {req.source === "site" ? (
           <>
-            <b className="amber-text">{siteHost}</b> asks to start an agent in your terminal.
+            <b className="strong">{siteHost}</b> asks to start an agent in your terminal.
           </>
         ) : (
           <>
-            A <b className="amber-text">builderwars://</b> link (opened by a web page or another app) asks to start an agent in your
+            A <b className="strong">builderwars://</b> link (opened by a web page or another app) asks to start an agent in your
             terminal.
           </>
         )}
       </p>
-      <p>
-        AGENT <b>{AGENT_LABELS[req.agent]}</b> · DIR <b>{workDir}</b>
-        {queued > 0 ? <span className="muted"> · {queued} more waiting</span> : null}
+      <p className="facts">
+        <span>
+          Agent <b>{AGENT_LABELS[req.agent]}</b>
+        </span>
+        <span>
+          Folder <b>{workDir}</b>
+        </span>
+        {queued > 0 ? <span>{queued} more waiting</span> : null}
       </p>
       <pre className="prompt-text">{req.prompt}</pre>
       {req.source === "site" && (
@@ -683,11 +755,11 @@ function ConfirmPanel({
         </label>
       )}
       <div className="row">
-        <button ref={runRef} className="btn amber" onClick={() => onDecide(true, always)}>
-          RUN ▸
+        <button ref={runRef} className="btn primary" onClick={() => onDecide(true, always)}>
+          Run
         </button>
         <button className="btn" onClick={() => onDecide(false, false)}>
-          CANCEL
+          Cancel
         </button>
       </div>
     </div>

@@ -13,6 +13,7 @@ import {
   DEEP_LINK_SCHEME,
   SHELL_CHANNELS,
   SHELL_EVENTS,
+  THEME_BACKGROUNDS,
   type ChildPane,
   type GameBridgeConfig,
   type LauncherInfo,
@@ -200,6 +201,10 @@ function start(): void {
       ensureWorkDir(dir);
     }
     saveSettings(settingsFile, next);
+    if (next.theme !== settings.theme) {
+      win?.setBackgroundColor(THEME_BACKGROUNDS[next.theme]);
+      panes?.setBackground(THEME_BACKGROUNDS[next.theme]);
+    }
     settings = next;
   });
   handleShell(SHELL_CHANNELS.pickWorkDir, z.tuple([]), shellWc, async () => {
@@ -364,7 +369,7 @@ function start(): void {
       height: 1000,
       minWidth: 960,
       minHeight: 600,
-      backgroundColor: "#05080a",
+      backgroundColor: THEME_BACKGROUNDS[settings.theme],
       ...(process.platform === "linux" && fs.existsSync(icon) ? { icon } : {}),
       webPreferences: {
         preload: path.join(here, "../preload/shell.js"),
@@ -400,6 +405,7 @@ function start(): void {
       gameStartUrl: `${site.base}/dashboard`,
       gamePreload: path.join(here, "../preload/game.js"),
       bridgeConfig,
+      background: THEME_BACKGROUNDS[settings.theme],
       send,
       onF6: () => send(SHELL_EVENTS.focusCycle, undefined),
     });
