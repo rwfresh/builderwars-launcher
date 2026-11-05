@@ -1,7 +1,7 @@
 // electron-builder afterSign hook (electron-builder.yml: `mac.notarize: false` + `afterSign`). Notarizes each signed macOS app
 // with notarytool, then staples the ticket, retrying the staple: Apple's ticket service sometimes drops the connection
 // ("The staple and validate action failed! Error 68"), which used to fail the whole build after Apple had already accepted
-// the app (twice on Nov 5 2026). Runs only when the Apple notarization credentials are set (CI, docs/releasing.md); local and
+// the app (twice on Nov 5 2026). Runs only when the Apple notarization credentials are set (release builds); local and
 // ad-hoc builds skip it. Never prints execFileSync's error message, which contains the command line and so the password.
 "use strict";
 

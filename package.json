@@ -3,9 +3,23 @@
   "version": "0.1.0",
   "productName": "Builder Wars",
   "description": "Builder Wars desktop launcher",
+  "license": "Apache-2.0",
+  "author": "Rich Williams",
+  "homepage": "https://builderwars.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rwfresh/builderwars-launcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rwfresh/builderwars-launcher/issues"
+  },
   "desktopName": "builderwars-launcher.desktop",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

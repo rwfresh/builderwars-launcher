@@ -1,6 +1,12 @@
 # Builder Wars launcher
 
-Electron desktop shell for Builder Wars (ARCHITECTURE.md §14). One window with three panes:
+The desktop app for [Builder Wars](https://builderwars.ai), the game where you build products with your own AI agent and ship
+them on X. It is an Electron shell that puts your agent's terminal, the game and x.com side by side.
+
+**Download:** [builderwars.ai/download](https://builderwars.ai/download) (Linux, Windows, macOS). This repository is the app's
+source. The game itself (website, API, scoring) is a separate service and not part of it.
+
+One window with three panes:
 
 - **Terminal** (left): xterm.js wired to a PTY (`node-pty`) in the main process. It runs your login shell (`$SHELL -l`, falling back to bash; PowerShell on Windows), or `herdr --session builderwars` when herdr mode is on. The toolbar under it has the agent picker, the herdr toggle, settings, a prompt box and the focus-cycle button.
 - **Game** (center): `https://builderwars.ai/dashboard` in a `WebContentsView`. It is not an iframe, so the site's cookies are first-party and "Sign in with X" works inside the pane.
@@ -8,22 +14,31 @@ Electron desktop shell for Builder Wars (ARCHITECTURE.md §14). One window with 
 
 The game and X panes share one persistent session partition, `persist:web`, stored under the app's userData folder (`~/.config/Builder Wars` on Linux, `~/Library/Application Support/Builder Wars` on macOS, `%APPDATA%\Builder Wars` on Windows). You sign in to X once, and the login survives restarts. Settings live next to it in `settings.json`.
 
-## Run
+## Build from source
+
+Requirements: Node 22.12 or newer, pnpm 9 (`corepack enable` picks the version pinned in `package.json`), and on Linux a C/C++
+toolchain and Python 3, because `node-pty` compiles from source there (macOS and Windows use its prebuilt binaries).
 
 ```bash
-pnpm --filter @builderwars/launcher dev        # electron-vite dev: renderer with HMR, main/preload rebuilt on change
-pnpm --filter @builderwars/launcher build      # typecheck (renderer + electron tsconfigs) and electron-vite build -> out/
-pnpm --filter @builderwars/launcher start      # run the built app (electron .)
-pnpm --filter @builderwars/launcher test       # vitest: agent CLI mapping and quoting, bridge, layout math, main-process helpers
+pnpm install --frozen-lockfile
+pnpm dev        # electron-vite dev: renderer with HMR, main/preload rebuilt on change
+pnpm build      # typecheck (renderer + electron tsconfigs) and electron-vite build -> out/
+pnpm start      # run the built app (electron .)
+pnpm test       # vitest: agent CLI mapping and quoting, bridge, layout math, main-process helpers
 ```
 
-Build output: `out/main/index.js`, `out/preload/shell.js`, `out/preload/game.js`, `out/renderer/**`. To package locally, see [Packaging](#packaging-ci-and-signing).
+Build output: `out/main/index.js`, `out/preload/shell.js`, `out/preload/game.js`, `out/renderer/**`. To package installers, see [Packaging](#packaging-and-releases).
+
+Troubleshooting:
+
+- `node-gyp: command not found` during install: standalone pnpm builds (for example mise's, or `@pnpm/exe`) do not bundle node-gyp. Install it (`npm install -g node-gyp`) or use the pnpm that corepack provides.
+- `Electron failed to install correctly` on `pnpm dev`: pnpm restored Electron from its cache without the binary. Run `node node_modules/electron/install.js`.
 
 Options (CLI or env):
 
 | | |
 |---|---|
-| `--url http://localhost:3000` or `BW_SITE_URL=...` | Game site URL. The bridge trusts only this origin. Precedence: `--url`, then env, then the setting, then `https://builderwars.ai`. In dev the env form is simplest: `BW_SITE_URL=http://localhost:3000 pnpm --filter @builderwars/launcher dev`. |
+| `--url http://localhost:3000` or `BW_SITE_URL=...` | Game site URL. The bridge trusts only this origin. Precedence: `--url`, then env, then the setting, then `https://builderwars.ai`. In dev the env form is simplest: `BW_SITE_URL=http://localhost:3000 pnpm dev`. |
 | `BW_DATA_ROOT=dir` | Moves userData (settings, the `persist:web` profile, the single-instance lock) into `dir`. Use it for tests or a second instance next to your real one. |
 | `BW_REGISTER_DEEPLINK=1` | Registers `builderwars://` for this binary at startup in dev builds. Packaged builds always register at runtime too. |
 | `BW_USE_HERDR=0/1` | Overrides the herdr setting for this run (not saved). |
@@ -33,7 +48,7 @@ Options (CLI or env):
 
 ## Bridge (site <-> launcher), v1
 
-The contract is unchanged from the first launcher: the site code (`apps/web/lib/launcher-bridge.ts`) works as before. The TypeScript type is `BuilderwarsLauncherApi` in `src/bridge.ts`; the process/IPC contract is `electron/shared/contract.ts`.
+builderwars.ai looks for `window.builderwarsLauncher`, validates its shape, and shows "Run in terminal" buttons only when it is present; in a normal browser nothing changes. The TypeScript type is `BuilderwarsLauncherApi` in `src/bridge.ts`; the process/IPC contract is `electron/shared/contract.ts`. The site's side of this contract lives in the game's own codebase, so a change to the shape or the `version` needs a matching site release: open an issue before changing it.
 
 `electron/preload/game.ts` is the preload of the **game view only**. It defines the global only when the top-level document is on the configured site origin, so an OAuth hop to x.com in that view (or a sign-in popup that inherits the preload) gets nothing:
 
@@ -103,7 +118,7 @@ Each decision is logged as `[pane] new-window <scheme://host> -> popup|navigate-
 - The web session denies sensitive permission requests (camera and microphone, location, notifications, MIDI, HID, serial, USB, screen capture).
 - Pages on the site origin, and any page that opens a `builderwars://` link, can only *ask* to run a prompt. The player sees the full prompt and must press Run (site prompts can be allowed for the session). An XSS on builderwars.ai still gets as far as that dialog, so keep the site's CSP tight.
 
-## Packaging, CI and signing
+## Packaging and releases
 
 Config: `electron-builder.yml`. Icons and installer resources: `build/` (`icon.png` 512 px, `icon.icns`, `icon.ico`, `entitlements.mac.plist`, `installer.nsh`). Output: `release/`.
 
@@ -116,51 +131,44 @@ Config: `electron-builder.yml`. Icons and installer resources: `build/` (`icon.p
 Package locally (after `build`):
 
 ```bash
-cd apps/launcher
 pnpm exec electron-builder --linux --publish never   # deb/rpm: see the note below
 pnpm exec electron-builder --mac --publish never     # on a Mac; add -c.mac.identity=- for an ad-hoc signed build
 pnpm exec electron-builder --win --publish never     # on Windows
 pnpm exec electron-builder --linux dir               # unpacked app in release/linux-unpacked, quickest check
 ```
 
-`node-pty` is an N-API addon, so it is not rebuilt for Electron (`npmRebuild: false`): macOS and Windows use the prebuilds in the package, and Linux uses the binary compiled by `pnpm install`. electron-builder 26 collects production dependencies through `pnpm list`, so the workspace's default isolated `node_modules` works without hoisting.
+`node-pty` is an N-API addon, so it is not rebuilt for Electron (`npmRebuild: false`): macOS and Windows use the prebuilds in the package, and Linux uses the binary compiled by `pnpm install`. electron-builder 26 collects production dependencies through `pnpm list`, so pnpm's default isolated `node_modules` works without hoisting.
 
 For deb and rpm, electron-builder runs its bundled fpm, whose Ruby needs `libcrypt.so.1` (on Arch: `libxcrypt-compat`); rpm also needs `rpmbuild` (the `rpm` package). The AppImage has no such needs. The AppImage's .desktop entry does not force `--no-sandbox` (`appImage.executableArgs: []`), so Chromium's sandbox stays on wherever unprivileged user namespaces work, and AppRun falls back to `--no-sandbox` only where they do not. The deb's post-install script sets up `chrome-sandbox` as usual.
 
-`.github/workflows/launcher.yml` builds the installers and uploads them to a **draft** GitHub Release:
+**Your own builds are unsigned.** On macOS add `-c.mac.identity=-` for an ad-hoc signature; Gatekeeper still blocks the app until you right-click > Open, or run `xattr -dr com.apple.quarantine "/Applications/Builder Wars.app"`. If you have your own certificates, electron-builder's standard variables switch signing on: `CSC_LINK` and `CSC_KEY_PASSWORD` (a base64 Developer ID Application .p12 and its password), plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization, which `build/notarize.cjs` runs as an `afterSign` hook with stapling retries. Signed macOS builds use the hardened runtime with `build/entitlements.mac.plist`.
 
-```bash
-git tag launcher-v0.1.0 && git push origin launcher-v0.1.0   # tag build
-gh workflow run launcher.yml --ref main                        # manual; uses tag launcher-v<package.json version>; -f platforms=linux|windows|macos
-gh run watch                                                   # follow it
-```
+**Official releases** are built from this source by the maintainers' release pipeline, signed (macOS: Developer ID and notarized by Apple; Windows is unsigned until a code-signing certificate exists, so SmartScreen warns on first run) and published with a `SHA256SUMS` file to [rwfresh/builderwars-releases](https://github.com/rwfresh/builderwars-releases), which [builderwars.ai/download](https://builderwars.ai/download) and the update feed (`publish` in `electron-builder.yml`) read. Install Builder Wars only from there, or from a build you made yourself.
 
-A first job creates the draft release, or reuses it if one exists for the tag. Each platform job then runs `pnpm install --frozen-lockfile`, `pnpm --filter @builderwars/launcher build` and `electron-builder --<platform> --publish never`, checks the macOS signature and notarization when signing is on, writes `build-info-<platform>.json` (version, commit, run, signed, notarized), and uploads it with `release/*` via `gh release upload --clobber`. Electron and electron-builder downloads are cached.
-
-Players never download from this private repo. `scripts/release/publish-launcher.sh <version>` verifies a finished draft and copies it to the public repo [rwfresh/builderwars-releases](https://github.com/rwfresh/builderwars-releases) as `v<version>`, which [builderwars.ai/download](https://builderwars.ai/download) reads. The whole procedure, for agents and humans, is [docs/releasing.md](../../docs/releasing.md).
-
-Optional secrets (Settings > Secrets and variables > Actions). Builds are unsigned without them, and the macOS app is then ad-hoc signed (Gatekeeper blocks it: right-click > Open, or `xattr -dr com.apple.quarantine "/Applications/Builder Wars.app"`). The Tauri-era secret names keep working:
-
-| electron-builder env | Repository secret (new name, or old name) | Purpose |
-|---|---|---|
-| `CSC_LINK` | `CSC_LINK` or `APPLE_CERTIFICATE` | base64 of the Developer ID Application .p12 |
-| `CSC_KEY_PASSWORD` | `CSC_KEY_PASSWORD` or `APPLE_CERTIFICATE_PASSWORD` | its password |
-| `CSC_NAME` | `APPLE_SIGNING_IDENTITY` (optional) | picks the certificate; the `Developer ID Application: ` prefix is stripped |
-| `APPLE_ID` | `APPLE_ID` | notarization (needs signing as well) |
-| `APPLE_APP_SPECIFIC_PASSWORD` | `APPLE_APP_SPECIFIC_PASSWORD` or `APPLE_PASSWORD` | notarization, app-specific password |
-| `APPLE_TEAM_ID` | `APPLE_TEAM_ID` | notarization |
-| (none) | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | no longer used; delete them |
-
-Signed builds use the hardened runtime with `build/entitlements.mac.plist`. Windows stays unsigned until a code-signing certificate exists (SmartScreen warns on first run).
+**CI in this repository** (`.github/workflows/ci.yml`) typechecks, tests and builds on Linux, Windows and macOS for every push and pull request, and packages an unpacked Linux app. It holds no secrets and never signs or publishes anything.
 
 ## Platform notes
 
 - **Linux** is the development platform (Omarchy/Hyprland, Wayland; X11 through Xwayland). The unpacked build and the AppImage were packaged and started here (PTY, game and X panes load). The deb and rpm builds have not been produced locally yet (see the fpm note above).
-- **Windows and macOS are untested at runtime.** CI builds them, but nobody has run them yet. Known differences: on Windows the PTY is ConPTY running `powershell.exe -NoLogo`, and `pty:is-idle` always reports idle (there is no foreground process group), so a prompt can be typed into a busy terminal. On macOS the login-shell PATH comes from `$SHELL -l -i`, an application menu provides the standard edit shortcuts, and deep links reach only the installed bundle.
+- **Windows and macOS are untested at runtime.** CI builds them, but nobody has run them yet, so reports from either are very welcome. Known differences: on Windows the PTY is ConPTY running `powershell.exe -NoLogo`, and `pty:is-idle` always reports idle (there is no foreground process group), so a prompt can be typed into a busy terminal. On macOS the login-shell PATH comes from `$SHELL -l -i`, an application menu provides the standard edit shortcuts, and deep links reach only the installed bundle.
 
 ## Follow-ups
 
 - **Updater:** add `electron-updater` and call `autoUpdater.checkForUpdatesAndNotify()` from main, and add a `zip` mac target (Squirrel.Mac needs it). `publish` in `electron-builder.yml` already points at the public repo `rwfresh/builderwars-releases` (tags `v<version>`), and every published release there carries `latest*.yml` and the blockmaps.
-- **Tray icon** and level-up notifications (game-design-notes.md, "Extras").
+- **Tray icon** and level-up notifications.
 - **Windows code signing** once a certificate exists (electron-builder `win.signtoolOptions` or Azure Trusted Signing).
 - Electron fuses (`electronFuses`): keep `runAsNode` on, because node-pty on Windows forks a helper with `child_process.fork`.
+- **Runtime testing on Windows and macOS** (see [Platform notes](#platform-notes)).
+
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Coding agents: start with [AGENTS.md](AGENTS.md).
+Security problems go through a private report, not an issue: see [SECURITY.md](SECURITY.md).
+
+## License and trademarks
+
+The source code is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Rich Williams and contributors.
+
+The license covers the code, not the brand. The "Builder Wars" name and the app icons in `build/` identify the official app;
+if you distribute a modified build, give it a different name and icon so players can tell it apart from the one at
+builderwars.ai/download.

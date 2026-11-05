@@ -1,11 +1,11 @@
-# electron-builder config for the Builder Wars launcher (ARCHITECTURE.md §14, README "Packaging").
-# Local:  pnpm --filter @builderwars/launcher build && pnpm --filter @builderwars/launcher exec electron-builder --linux --publish never
-# CI:     .github/workflows/launcher.yml runs the same per platform and uploads release/* to a draft GitHub release.
+# electron-builder config for the Builder Wars launcher (README "Packaging and releases").
+# Local:  pnpm build && pnpm exec electron-builder --linux --publish never
+# Release builds run the same per platform with signing variables set.
 # Version comes from package.json. Signing is opt-in through env vars (CSC_LINK etc.); nothing here holds a secret.
 appId: ai.builderwars.launcher
 productName: Builder Wars
 copyright: Copyright © 2026 Builder Wars
-# deb/rpm (fpm) require a homepage; package.json has none, so it is supplied here.
+# deb/rpm (fpm) require a homepage; kept here so packaging does not depend on package.json metadata.
 extraMetadata:
   homepage: https://builderwars.ai
 
@@ -47,9 +47,8 @@ protocols:
 
 # Updater-ready: electron-builder already writes latest*.yml next to the installers and app-update.yml
 # into the app. Turning updates on later = add electron-updater + `autoUpdater.checkForUpdatesAndNotify()`
-# in main and a `zip` mac target (Squirrel.Mac needs it). CI keeps uploading with --publish never.
-# The feed is the PUBLIC downloads repo (tags v<version>), filled by scripts/release/publish-launcher.sh
-# (docs/releasing.md). CI drafts in rwfresh/builderwars are never read by installed apps.
+# in main and a `zip` mac target (Squirrel.Mac needs it). Builds always run with --publish never.
+# The feed is the public downloads repo (tags v<version>), which only the maintainers' release step publishes to.
 publish:
   provider: github
   owner: rwfresh

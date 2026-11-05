@@ -1,7 +1,7 @@
 // Contract between the Electron main process, the preload scripts and the renderer (shell UI).
 // Pure types and constants: importable from main, preload and renderer code alike.
 //
-// Process model (mirrors the Tauri design it replaces, ARCHITECTURE §14):
+// Process model (mirrors the Tauri design it replaces):
 //   - `shell`  renderer: our own UI (terminal, toolbars, dividers). Preload `electron/preload/shell.ts`
 //              exposes `window.launcher` (ShellApi). Only this webContents may call SHELL_CHANNELS.
 //   - `game`   WebContentsView: https://builderwars.ai (configurable). Preload `electron/preload/game.ts`
