@@ -36,6 +36,9 @@ asarUnpack:
 # Spectre-mitigated MSVC libs) and cross-compiling x64 on the arm64 macOS runner.
 npmRebuild: false
 
+# macOS notarization + stapling with retries (replaces electron-builder's built-in step, see mac.notarize below).
+afterSign: build/notarize.cjs
+
 # builderwars://run?prompt=...  Linux: MimeType x-scheme-handler/builderwars in the .desktop file;
 # macOS: CFBundleURLTypes. Windows: registry keys from build/installer.nsh (NSIS has no built-in support).
 protocols:
@@ -111,6 +114,8 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   # Notarization runs only when APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID are set (and the app is signed).
   # Unsigned CI builds are ad-hoc signed instead (-c.mac.identity=- -c.mac.hardenedRuntime=false), see the workflow.
+  # build/notarize.cjs (afterSign) does the notarizing instead of electron-builder, so that stapling can be retried.
+  notarize: false
   artifactName: builderwars-launcher-${version}-macos-${arch}.${ext}
 
 dmg:
