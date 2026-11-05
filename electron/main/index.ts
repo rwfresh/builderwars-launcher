@@ -2,7 +2,7 @@
 // One window: the shell renderer (our UI: terminal, toolbars, dividers) with two WebContentsViews
 // on top (game = our site, xpane = x.com). Contract: electron/shared/contract.ts.
 
-import { app, BrowserWindow, dialog, Menu, session, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, Menu, session, shell as electronShell, type WebContents } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,8 +19,9 @@ import {
   type Settings,
   type ShellEventName,
   type ShellEventPayloads,
+  type UpdateState,
 } from "../shared/contract";
-import { autotestBridge, autotestPopup } from "./autotest";
+import { autotestBridge, autotestPopup, autotestUpdate } from "./autotest";
 import { PromptBridge } from "./bridge";
 import { DeepLinkQueue, deepLinksInArgv } from "./deeplink";
 import { adoptLoginShellPath, detect } from "./envinfo";
@@ -30,10 +31,16 @@ import { Panes } from "./panes";
 import { PtyManager } from "./pty";
 import { ensureWorkDir, loadSettings, parseSiteUrl, resolveSiteUrl, resolveWorkDir, saveSettings, settingsSchema } from "./settings";
 import { hostForLog, parseXUrl } from "./urls";
+import { noUpdateArgs, parseFeedOverride, selectUpdateMode, UpdateController } from "./updater";
 import { validateAgent } from "./validate";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const AUTOTEST = process.env.BW_AUTOTEST === "1";
+
+// An AppImage that just replaced itself (electron-updater, "Restart now") starts its successor with this variable
+// set, usually while the old instance is still quitting. Read it once and keep it out of the terminals' env.
+const UPDATE_RELAUNCH = process.env.APPIMAGE_SILENT_INSTALL === "true";
+delete process.env.APPIMAGE_SILENT_INSTALL;
 
 // Must run before anything reads PATH (agent detection, PTY, herdr).
 adoptLoginShellPath();
@@ -44,12 +51,31 @@ const dataRoot = process.env.BW_DATA_ROOT;
 if (dataRoot) app.setPath("userData", path.resolve(dataRoot));
 
 function main(): void {
-  if (!app.requestSingleInstanceLock()) {
+  if (app.requestSingleInstanceLock()) {
+    start();
+    return;
+  }
+  if (!UPDATE_RELAUNCH) {
     // Another launcher owns this profile; it receives our argv (deep link) via second-instance.
     app.quit();
     return;
   }
+  // Relaunched by the updater: the old instance holds the lock until it has finished quitting. Wait for it.
+  let tries = 0;
+  const timer = setInterval(() => {
+    if (app.requestSingleInstanceLock()) {
+      clearInterval(timer);
+      console.log(`[launcher] relaunched after an update (waited ${(tries + 1) * 250} ms for the old instance)`);
+      start();
+    } else if (++tries >= 60) {
+      clearInterval(timer);
+      console.error("[launcher] relaunched after an update, but the old instance is still running; quitting");
+      app.quit();
+    }
+  }, 250);
+}
 
+function start(): void {
   const env = detect();
   const home = os.homedir();
   const settingsFile = path.join(app.getPath("userData"), "settings.json");
@@ -83,7 +109,7 @@ function main(): void {
     if (wc && !wc.isDestroyed()) wc.send(event, payload);
   };
   const focusWindow = () => {
-    if (!win) return;
+    if (!win || win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
@@ -124,6 +150,16 @@ function main(): void {
     if (!ok) console.error("[deeplink] register failed");
   }
 
+  // Updates (electron/main/updater.ts): packaged builds only; created once the app is ready.
+  const updateMode = selectUpdateMode({ isPackaged: app.isPackaged, platform: process.platform, appImage: process.env.APPIMAGE });
+  const feed = parseFeedOverride(process.env.BW_UPDATE_FEED_URL);
+  if (feed.kind === "ignored") console.warn(`[updater] ignoring BW_UPDATE_FEED_URL: ${feed.reason}`);
+  let updates: UpdateController | null = null;
+  const requireUpdates = (): UpdateController => {
+    if (!updates) throw new Error(updateMode === "off" ? "updates are off in development builds" : "the updater is not running");
+    return updates;
+  };
+
   const pty = new PtyManager((id, event) => send(SHELL_EVENTS.ptyEvent, { id, event }));
   const bridge = new PromptBridge({
     request: (ev) => send(SHELL_EVENTS.bridgeRunPrompt, ev),
@@ -140,6 +176,8 @@ function main(): void {
     workDir: workDir(),
     home,
     autotest: AUTOTEST,
+    version: app.getVersion(),
+    updates: { mode: updateMode, state: updates?.state ?? ({ kind: "idle" } satisfies UpdateState) },
   }));
   // Print a line to the launcher's stdout (diagnostics).
   handleShell(SHELL_CHANNELS.debugLog, z.tuple([z.string()]), shellWc, (msg) => {
@@ -234,6 +272,10 @@ function main(): void {
     bridge.resolve(id, ok, value),
   );
 
+  handleShell(SHELL_CHANNELS.updateCheck, noUpdateArgs, shellWc, () => requireUpdates().checkNow());
+  handleShell(SHELL_CHANNELS.updateRestart, noUpdateArgs, shellWc, () => requireUpdates().restart());
+  handleShell(SHELL_CHANNELS.updateOpenDownload, noUpdateArgs, shellWc, () => requireUpdates().openDownload());
+
   // ---- game-view bridge IPC (site origin only) ----
   handleBridge(BRIDGE_CHANNELS.runPrompt, z.tuple([z.string(), z.string().nullable()]), gameWc, site.origin, (prompt, agent) =>
     bridge.runPrompt(prompt, agent),
@@ -252,10 +294,48 @@ function main(): void {
   const coldLinks = deepLinksInArgv(process.argv.slice(1));
 
   app.on("window-all-closed", () => app.quit());
+  // Also runs on an update install: electron-updater's quitAndInstall (Windows, Linux) starts the installer and then
+  // calls app.quit(), and Squirrel.Mac closes the windows and then quits, so before-quit fires on every path.
+  let quitLogged = false;
   app.on("before-quit", () => {
+    if (!quitLogged) console.log("[launcher] quitting: stopping terminals and the herdr session");
+    quitLogged = true;
     pty.killAll();
     stopHerdrSession();
   });
+
+  const startUpdater = async (): Promise<void> => {
+    const autotestUpdates = process.env.BW_AUTOTEST_UPDATE === "1";
+    if (updateMode === "off") {
+      console.log("[updater] off (unpackaged build)");
+      if (autotestUpdates) console.log("[autotest] update test skipped: needs a packaged build");
+      return;
+    }
+    // electron-updater is CommonJS; its autoUpdater getter picks the platform's updater on first access.
+    type UpdaterModule = typeof import("electron-updater");
+    const mod = (await import("electron-updater")) as UpdaterModule & { default?: UpdaterModule };
+    const c = new UpdateController({
+      updater: (mod.default ?? mod).autoUpdater,
+      mode: updateMode,
+      currentVersion: app.getVersion(),
+      feedUrl: feed.kind === "ok" ? feed.url : null,
+      timers: {
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
+        setInterval: (fn, ms) => setInterval(fn, ms),
+        clearInterval: (h) => clearInterval(h as NodeJS.Timeout),
+      },
+      notify: (state) => send(SHELL_EVENTS.updateState, state),
+      openExternal: (url) => electronShell.openExternal(url),
+      log: { info: (l) => console.log(l), warn: (l) => console.warn(l), error: (l) => console.error(l) },
+    });
+    updates = c;
+    c.start();
+    if (autotestUpdates) {
+      if (feed.kind === "ok") autotestUpdate(c, () => app.quit());
+      else console.log("[autotest] update test skipped: needs BW_UPDATE_FEED_URL");
+    }
+  };
 
   void app.whenReady().then(() => {
     // Our own UI (default session) never needs a permission prompt beyond clipboard writes.
@@ -333,6 +413,7 @@ function main(): void {
     if (process.env.BW_AUTOTEST_POPUP === "1") {
       autotestPopup(panes.game.webContents, () => BrowserWindow.getAllWindows().map((w) => w.getTitle()));
     }
+    startUpdater().catch((e: unknown) => console.error(`[updater] failed to start: ${e instanceof Error ? e.message : String(e)}`));
   });
 }
 

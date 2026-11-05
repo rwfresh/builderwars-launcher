@@ -13,7 +13,7 @@ import {
   type ShellEventPayloads,
 } from "../electron/shared/contract";
 
-export type { ChildPane, EnvInfo, LauncherInfo, PtyEvent, PtyMode, Settings } from "../electron/shared/contract";
+export type { ChildPane, EnvInfo, LauncherInfo, PtyEvent, PtyMode, Settings, UpdateMode, UpdateState } from "../electron/shared/contract";
 
 const api = () => window.launcher;
 
@@ -71,3 +71,6 @@ export const paneFocus = (pane: "terminal" | ChildPane) => api().paneFocus(pane)
 export const pickWorkDir = () => api().pickWorkDir();
 export const deeplinkTake = (): Promise<DeepLinkRequest[]> => api().deeplinkTake();
 export const bridgeResolve = (id: number, ok: boolean, value: string) => api().bridgeResolve(id, ok, value);
+export const updateCheck = () => api().updateCheck();
+export const updateRestart = () => api().updateRestart();
+export const updateOpenDownload = () => api().updateOpenDownload();

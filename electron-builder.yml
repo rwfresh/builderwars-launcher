@@ -45,10 +45,12 @@ protocols:
   - name: Builder Wars
     schemes: [builderwars]
 
-# Updater-ready: electron-builder already writes latest*.yml next to the installers and app-update.yml
-# into the app. Turning updates on later = add electron-updater + `autoUpdater.checkForUpdatesAndNotify()`
-# in main and a `zip` mac target (Squirrel.Mac needs it). Builds always run with --publish never.
-# The feed is the public downloads repo (tags v<version>), which only the maintainers' release step publishes to.
+# Update feed (electron/main/updater.ts, README "Updates"). electron-builder embeds this entry in the app as
+# resources/app-update.yml and writes latest.yml / latest-mac.yml / latest-linux.yml plus .blockmap files next to the
+# installers; electron-updater in the app reads them from the public downloads repo's latest release (tag v<version>).
+# Prereleases are ignored, so a bad release is pulled by marking it a prerelease. Builds always run with
+# --publish never: only the maintainers' release step uploads to that repo. macOS installs from the zip (Squirrel.Mac),
+# Windows from the NSIS installer, the AppImage replaces itself; deb and rpm only get a "new version" notice.
 publish:
   provider: github
   owner: rwfresh
@@ -103,8 +105,11 @@ nsis:
 mac:
   # Separate Intel and Apple Silicon dmgs instead of one universal app: node-pty ships per-arch
   # Mach-O prebuilds that @electron/universal refuses to merge without extra rules, and each dmg is half the size.
+  # The zip is what Squirrel.Mac (the in-app updater) downloads and installs; the dmg is for first installs.
   target:
     - target: dmg
+      arch: [x64, arm64]
+    - target: zip
       arch: [x64, arm64]
   icon: build/icon.icns
   category: public.app-category.games

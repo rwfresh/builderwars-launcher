@@ -14,12 +14,17 @@ import {
   paneNav,
   pickWorkDir,
   saveSettings,
+  updateCheck,
+  updateOpenDownload,
+  updateRestart,
   type ChildPane,
   type LauncherInfo,
   type Settings,
+  type UpdateState,
 } from "./ipc";
 import { DEFAULT_LAYOUT, DIVIDER_PX, computeColumns, dragDivider, nextFocus, toggleCollapsed, type LayoutState, type PaneId } from "./layout";
 import { Terminal, type TerminalHandle } from "./Terminal";
+import { parseUpdateState, UPDATE_MODE_LABELS, updateBanner, type UpdateAction } from "./update";
 
 interface PaneInfo {
   url: string;
@@ -77,6 +82,7 @@ function Shell({ info }: { info: LauncherInfo }) {
   const [workDir, setWorkDir] = useState(info.workDir);
   const [queue, setQueue] = useState<PendingRun[]>([]);
   const [allowSiteSession, setAllowSiteSession] = useState(false);
+  const [update, setUpdate] = useState<UpdateState>(info.updates.state);
   const siteHost = new URL(info.siteUrl).host;
   const confirm = queue[0] ?? null;
   const term = useRef<TerminalHandle>(null);
@@ -197,6 +203,10 @@ function Shell({ info }: { info: LauncherInfo }) {
         );
       }),
       onLauncherEvent(SHELL_EVENTS.notice, (msg) => setStatus(String(msg))),
+      onLauncherEvent(SHELL_EVENTS.updateState, (payload) => {
+        const s = parseUpdateState(payload);
+        if (s) setUpdate(s);
+      }),
       onLauncherEvent(SHELL_EVENTS.paneLoad, (payload) => {
         const p = paneLoadSchema.safeParse(payload);
         if (!p.success) return;
@@ -335,6 +345,8 @@ function Shell({ info }: { info: LauncherInfo }) {
               <SettingsPanel
                 info={info}
                 settings={settings}
+                updateBusy={update.kind === "checking"}
+                onCheckUpdates={() => void updateCheck().catch((e: unknown) => setStatus(`update check failed: ${e instanceof Error ? e.message : String(e)}`))}
                 onClose={() => setSettingsOpen(false)}
                 onSave={async (s) => {
                   await saveSettings(s);
@@ -427,6 +439,7 @@ function Shell({ info }: { info: LauncherInfo }) {
                 RUN ▸
               </button>
             </form>
+            <UpdateBar state={update} onError={(msg) => setStatus(`update: ${msg}`)} />
             <div className="status" title={status}>
               ▌{status}
             </div>
@@ -505,14 +518,47 @@ function CollapsedStrip({ label, onExpand }: { label: string; onExpand: () => vo
   );
 }
 
+/** Update banner above the status line (states from electron/main/updater.ts). */
+function UpdateBar({ state, onError }: { state: UpdateState; onError: (msg: string) => void }) {
+  // LATER hides a ready update until the next launch (auto mode installs it on quit anyway); OK closes feedback.
+  const [laterVersion, setLaterVersion] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<UpdateState | null>(null);
+  const banner = updateBanner(state, laterVersion, dismissed);
+  if (!banner) return null;
+  const fail = (e: unknown) => onError(e instanceof Error ? e.message : String(e));
+  const run: Record<UpdateAction, () => void> = {
+    restart: () => void updateRestart().catch(fail),
+    later: () => setLaterVersion(state.kind === "ready" ? state.version : null),
+    download: () => void updateOpenDownload().catch(fail),
+    dismiss: () => setDismissed(state),
+  };
+  const labels: Record<UpdateAction, string> = { restart: "RESTART NOW", later: "LATER", download: "DOWNLOAD", dismiss: "OK" };
+  return (
+    <div className={`update-bar ${banner.subtle ? "subtle" : ""}`} role="status">
+      <span className="update-text" title={banner.text}>
+        {banner.text}
+      </span>
+      {banner.actions.map((a) => (
+        <button key={a} className={`btn ${a === "restart" || a === "download" ? "amber" : ""}`} onClick={run[a]}>
+          {labels[a]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SettingsPanel({
   info,
   settings,
+  updateBusy,
+  onCheckUpdates,
   onSave,
   onClose,
 }: {
   info: LauncherInfo;
   settings: Settings;
+  updateBusy: boolean;
+  onCheckUpdates: () => void;
   onSave: (s: Settings) => Promise<void>;
   onClose: () => void;
 }) {
@@ -566,6 +612,14 @@ function SettingsPanel({
         Game site URL (restart to apply; bridge only trusts this origin)
         <input value={draft.siteUrl} onChange={(e) => setDraft({ ...draft, siteUrl: e.target.value })} />
       </label>
+      <div className="settings-section">
+        <span>
+          Builder Wars {info.version} · updates {UPDATE_MODE_LABELS[info.updates.mode]}
+        </span>
+        <button className="btn" disabled={info.updates.mode === "off" || updateBusy} onClick={onCheckUpdates}>
+          CHECK FOR UPDATES
+        </button>
+      </div>
       <p className="muted">
         Active site: {info.siteUrl} · agents on PATH: {info.env.agents.join(", ") || "none"} · shell: {info.env.shell}
       </p>

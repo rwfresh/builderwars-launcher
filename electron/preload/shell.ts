@@ -36,6 +36,9 @@ const api: ShellApi = {
   pickWorkDir: () => invoke(SHELL_CHANNELS.pickWorkDir),
   deeplinkTake: () => invoke(SHELL_CHANNELS.deeplinkTake),
   bridgeResolve: (id, ok, value) => invoke(SHELL_CHANNELS.bridgeResolve, id, ok, value),
+  updateCheck: () => invoke(SHELL_CHANNELS.updateCheck),
+  updateRestart: () => invoke(SHELL_CHANNELS.updateRestart),
+  updateOpenDownload: () => invoke(SHELL_CHANNELS.updateOpenDownload),
   on(event, handler) {
     if (!EVENT_NAMES.has(event)) throw new Error(`unknown launcher event ${String(event)}`);
     const listener = (_e: IpcRendererEvent, payload: unknown) => (handler as (p: unknown) => void)(payload);

@@ -51,7 +51,36 @@ export interface LauncherInfo {
   workDir: string;
   home: string;
   autotest: boolean;
+  /** This app's version (package.json at build time). */
+  version: string;
+  /** How this build updates itself (see electron/main/updater.ts) and the updater's state at the time of the call. */
+  updates: { mode: UpdateMode; state: UpdateState };
 }
+
+/**
+ * How the app updates itself (electron/main/updater.ts):
+ *   - "off":    unpackaged and dev builds; no network calls.
+ *   - "auto":   macOS, Windows, Linux AppImage; downloads in the background, installs on restart or quit.
+ *   - "notify": other Linux packaging (deb, rpm); only says a new version exists and links to the download page,
+ *               because installing would need a privileged package-manager call.
+ */
+export type UpdateMode = "off" | "auto" | "notify";
+
+/**
+ * Updater state shown by the shell. "checking", "up-to-date" and "error" only follow a check the player asked
+ * for; background checks stay quiet unless they find an update.
+ */
+export type UpdateState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "available"; version: string }
+  | { kind: "downloading"; version: string; percent: number }
+  | { kind: "ready"; version: string }
+  | { kind: "up-to-date"; version: string }
+  | { kind: "error"; message: string };
+
+/** Where notify-mode builds send the player for a new version. Fixed: never taken from settings or remote input. */
+export const DOWNLOAD_PAGE_URL = "https://builderwars.ai/download";
 
 export type PtyEvent = { kind: "data"; data: string } | { kind: "exit"; code: number | null };
 
@@ -113,6 +142,9 @@ export const SHELL_CHANNELS = {
   pickWorkDir: "dialog:pick-work-dir",
   deeplinkTake: "deeplink:take",
   bridgeResolve: "bridge:resolve",
+  updateCheck: "update:check",
+  updateRestart: "update:restart",
+  updateOpenDownload: "update:open-download",
 } as const;
 
 /** Game view -> main (site origin only; the preload only defines the API on that origin and main re-checks). */
@@ -132,6 +164,7 @@ export const SHELL_EVENTS = {
   paneTitle: "pane:title", // PaneTitleEvent
   paneReveal: "pane:reveal", // ChildPane
   focusCycle: "focus:cycle", // undefined
+  updateState: "update:state", // UpdateState
 } as const;
 
 export type ShellEventName = (typeof SHELL_EVENTS)[keyof typeof SHELL_EVENTS];
@@ -146,6 +179,7 @@ export interface ShellEventPayloads {
   [SHELL_EVENTS.paneTitle]: PaneTitleEvent;
   [SHELL_EVENTS.paneReveal]: ChildPane;
   [SHELL_EVENTS.focusCycle]: undefined;
+  [SHELL_EVENTS.updateState]: UpdateState;
 }
 
 /** What `electron/preload/shell.ts` exposes as `window.launcher`. */
@@ -165,6 +199,12 @@ export interface ShellApi {
   pickWorkDir(): Promise<string | null>;
   deeplinkTake(): Promise<DeepLinkRequest[]>;
   bridgeResolve(id: number, ok: boolean, value: string): Promise<void>;
+  /** Check for an update now (the result arrives as update:state events). */
+  updateCheck(): Promise<void>;
+  /** Quit and install the downloaded update. Rejected unless an update is ready. */
+  updateRestart(): Promise<void>;
+  /** Notify mode: open the download page in the system browser. */
+  updateOpenDownload(): Promise<void>;
   /** Subscribe to a main-process event; returns an unsubscribe function. */
   on<E extends ShellEventName>(event: E, handler: (payload: ShellEventPayloads[E]) => void): () => void;
 }

@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { WebContents } from "electron";
+import type { UpdateController } from "./updater";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -104,4 +105,33 @@ export function autotestPopup(game: WebContents, windowTitles: () => string[]): 
     const r = await game.executeJavaScript("JSON.stringify(window.__bwPopup)").catch((e: unknown) => `error ${String(e)}`);
     console.log(`[autotest] popup result ${String(r)}`);
   })();
+}
+
+/**
+ * BW_AUTOTEST_UPDATE=1 (with BW_UPDATE_FEED_URL, packaged builds only): print every updater event and state as
+ * `[autotest] update ...` lines, install as soon as an update is ready, and quit when the feed has nothing newer
+ * (which is what the relaunched, updated app sees), when a notify-mode build has seen the update, or when the check fails.
+ */
+export function autotestUpdate(updates: UpdateController, quit: () => void): void {
+  console.log(`[autotest] update test armed: mode=${updates.mode}, waiting for the scheduled check`);
+  updates.subscribe((t) => {
+    console.log(`[autotest] update event=${t.event} version=${t.version ?? "-"} state=${JSON.stringify(t.state)}`);
+    if (t.event === "downloaded" && t.state.kind === "ready") {
+      console.log(`[autotest] update ready ${t.state.version}; calling quitAndInstall`);
+      setTimeout(() => {
+        try {
+          updates.restart();
+        } catch (e) {
+          console.log(`[autotest] update restart failed: ${e instanceof Error ? e.message : String(e)}`);
+          quit();
+        }
+      }, 500);
+    } else if (t.event === "available" && t.state.kind === "available") {
+      console.log(`[autotest] update ${t.state.version} available (notify mode: no download); quitting`);
+      quit();
+    } else if (t.event === "not-available" || t.event === "error") {
+      console.log(`[autotest] update test done (${t.event}); quitting`);
+      quit();
+    }
+  });
 }
