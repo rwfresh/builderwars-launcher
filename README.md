@@ -44,7 +44,7 @@ Options (CLI or env):
 | `BW_USE_HERDR=0/1` | Overrides the herdr setting for this run (not saved). |
 | `BW_AUTOTEST=1` | Self-test: once the site has loaded, calls `builderwarsLauncher` from inside the game page (empty prompt and foreign `openX` must be rejected, `runPrompt('hello','claude')` goes through the confirmation) and prints `[autotest]` lines to stdout. |
 | `BW_UPDATE_FEED_URL=http://127.0.0.1:<port>/` | Test hook: packaged builds read updates from this generic feed (a folder with `latest*.yml` and the installers) instead of the public one. Accepted only for http(s) on `127.0.0.1`, `localhost` or `[::1]`; anything else is ignored with a warning. See [Updates](#updates). |
-| `BW_AUTOTEST_UPDATE=1` | Update self-test, needs a packaged build and `BW_UPDATE_FEED_URL`: prints every updater event and state as `[autotest] update ...` lines, installs as soon as the update is ready (`quitAndInstall`), and quits if the feed has nothing newer. |
+| `BW_AUTOTEST_UPDATE=1` or `quit` | Update self-test, needs a packaged build and `BW_UPDATE_FEED_URL`: prints every updater event and state as `[autotest] update ...` lines and installs as soon as the update is ready. `1` installs through "Restart now" (`quitAndInstall`, the new version starts); `quit` through a plain quit (install on quit, nothing restarts). Quits if the feed has nothing newer. |
 | `BW_PTY_LOG=file` | Appends raw PTY output to `file`. |
 | `BW_SNAPSHOT_DIR=dir`, `BW_DEBUG_BOUNDS=1`, `BW_DEVTOOLS=1` | Diagnostics: PNG snapshots of the shell and game views during the self-test (never the X pane), pane bounds logging, detached DevTools for the shell. |
 
@@ -168,6 +168,11 @@ restarting (quitAndInstall)` and `[launcher] quitting: ...`. The new version the
 and quits (its output is not attached to your terminal). `XDG_CACHE_HOME` keeps the downloaded update out of your real
 `~/.cache`. Without range-request support in the server (Python's isn't), electron-updater logs that the differential
 download failed and downloads the whole file, which is fine for this test.
+
+`BW_AUTOTEST_UPDATE=quit` tests the other path, a plain quit with an update downloaded. Expect `[updater] Auto install
+update on quit` and `Install: isSilent: true, isForceRunAfter: false`. The updater then runs the new AppImage once with
+`APPIMAGE_EXIT_AFTER_INSTALL=true` only to finish the install, and the app exits at once in that case
+(`updateRelaunchKind` in `electron/main/updater.ts`), so the quit doesn't hang.
 
 ## Packaging and releases
 

@@ -21,6 +21,19 @@ export const UP_TO_DATE_VISIBLE_MS = 8_000;
 /** All update IPC channels take no arguments; anything else is rejected. */
 export const noUpdateArgs = z.tuple([]);
 
+/**
+ * How electron-updater started this process. Only the AppImage updater starts the new version itself, after moving it
+ * over the old file:
+ *   - "relaunch": "Restart now" (quitAndInstall) spawns it with APPIMAGE_SILENT_INSTALL=true to run as the new app,
+ *     usually while the old instance is still quitting and holding the single-instance lock.
+ *   - "exit-after-install": install on quit runs it synchronously with APPIMAGE_EXIT_AFTER_INSTALL=true as well, only
+ *     to finish the install. The quitting old instance waits for it to exit, so it must exit at once.
+ */
+export function updateRelaunchKind(env: Record<string, string | undefined>): "none" | "relaunch" | "exit-after-install" {
+  if (env.APPIMAGE_SILENT_INSTALL !== "true") return "none";
+  return env.APPIMAGE_EXIT_AFTER_INSTALL === "true" ? "exit-after-install" : "relaunch";
+}
+
 /** Which kind of updating this build does. */
 export function selectUpdateMode(p: { isPackaged: boolean; platform: NodeJS.Platform; appImage: string | undefined }): UpdateMode {
   if (!p.isPackaged) return "off";

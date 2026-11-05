@@ -10,6 +10,7 @@ import {
   parseFeedOverride,
   redactUrls,
   selectUpdateMode,
+  updateRelaunchKind,
   type Timers,
   type UpdaterLike,
   type UpdaterLogger,
@@ -131,6 +132,22 @@ describe("selectUpdateMode", () => {
     expect(selectUpdateMode({ isPackaged: true, platform: "linux", appImage: undefined })).toBe("notify"); // deb, rpm
     expect(selectUpdateMode({ isPackaged: true, platform: "linux", appImage: "" })).toBe("notify");
     expect(selectUpdateMode({ isPackaged: true, platform: "freebsd", appImage: undefined })).toBe("off");
+  });
+});
+
+describe("updateRelaunchKind", () => {
+  it("is a normal start without the AppImage updater's variables", () => {
+    expect(updateRelaunchKind({})).toBe("none");
+    expect(updateRelaunchKind({ APPIMAGE_SILENT_INSTALL: "false" })).toBe("none");
+    expect(updateRelaunchKind({ APPIMAGE_EXIT_AFTER_INSTALL: "true" })).toBe("none");
+  });
+
+  it("is the new app after Restart now (quitAndInstall spawns it with APPIMAGE_SILENT_INSTALL only)", () => {
+    expect(updateRelaunchKind({ APPIMAGE_SILENT_INSTALL: "true" })).toBe("relaunch");
+  });
+
+  it("only finishes an install on quit when APPIMAGE_EXIT_AFTER_INSTALL is set too", () => {
+    expect(updateRelaunchKind({ APPIMAGE_SILENT_INSTALL: "true", APPIMAGE_EXIT_AFTER_INSTALL: "true" })).toBe("exit-after-install");
   });
 });
 

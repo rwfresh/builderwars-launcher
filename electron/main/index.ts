@@ -31,16 +31,17 @@ import { Panes } from "./panes";
 import { PtyManager } from "./pty";
 import { ensureWorkDir, loadSettings, parseSiteUrl, resolveSiteUrl, resolveWorkDir, saveSettings, settingsSchema } from "./settings";
 import { hostForLog, parseXUrl } from "./urls";
-import { noUpdateArgs, parseFeedOverride, selectUpdateMode, UpdateController } from "./updater";
+import { noUpdateArgs, parseFeedOverride, selectUpdateMode, UpdateController, updateRelaunchKind } from "./updater";
 import { validateAgent } from "./validate";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const AUTOTEST = process.env.BW_AUTOTEST === "1";
 
-// An AppImage that just replaced itself (electron-updater, "Restart now") starts its successor with this variable
-// set, usually while the old instance is still quitting. Read it once and keep it out of the terminals' env.
-const UPDATE_RELAUNCH = process.env.APPIMAGE_SILENT_INSTALL === "true";
+// An AppImage that just replaced itself starts its successor (updateRelaunchKind in updater.ts): as the new app after
+// "Restart now", or only to finish an install on quit. Read the variables once and keep them out of the terminals' env.
+const UPDATE_RELAUNCH = updateRelaunchKind(process.env);
 delete process.env.APPIMAGE_SILENT_INSTALL;
+delete process.env.APPIMAGE_EXIT_AFTER_INSTALL;
 
 // Must run before anything reads PATH (agent detection, PTY, herdr).
 adoptLoginShellPath();
@@ -51,11 +52,17 @@ const dataRoot = process.env.BW_DATA_ROOT;
 if (dataRoot) app.setPath("userData", path.resolve(dataRoot));
 
 function main(): void {
+  if (UPDATE_RELAUNCH === "exit-after-install") {
+    // Run by the updater only to finish an install on quit; the old instance's quit waits for this process to exit.
+    console.log("[launcher] update installed on quit; exiting");
+    app.exit(0);
+    return;
+  }
   if (app.requestSingleInstanceLock()) {
     start();
     return;
   }
-  if (!UPDATE_RELAUNCH) {
+  if (UPDATE_RELAUNCH !== "relaunch") {
     // Another launcher owns this profile; it receives our argv (deep link) via second-instance.
     app.quit();
     return;
@@ -305,7 +312,8 @@ function start(): void {
   });
 
   const startUpdater = async (): Promise<void> => {
-    const autotestUpdates = process.env.BW_AUTOTEST_UPDATE === "1";
+    const autotestHow = process.env.BW_AUTOTEST_UPDATE === "quit" ? "quit" : "restart";
+    const autotestUpdates = process.env.BW_AUTOTEST_UPDATE === "1" || process.env.BW_AUTOTEST_UPDATE === "quit";
     if (updateMode === "off") {
       console.log("[updater] off (unpackaged build)");
       if (autotestUpdates) console.log("[autotest] update test skipped: needs a packaged build");
@@ -332,7 +340,7 @@ function start(): void {
     updates = c;
     c.start();
     if (autotestUpdates) {
-      if (feed.kind === "ok") autotestUpdate(c, () => app.quit());
+      if (feed.kind === "ok") autotestUpdate(c, () => app.quit(), autotestHow);
       else console.log("[autotest] update test skipped: needs BW_UPDATE_FEED_URL");
     }
   };

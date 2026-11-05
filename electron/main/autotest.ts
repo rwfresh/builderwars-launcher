@@ -108,15 +108,20 @@ export function autotestPopup(game: WebContents, windowTitles: () => string[]): 
 }
 
 /**
- * BW_AUTOTEST_UPDATE=1 (with BW_UPDATE_FEED_URL, packaged builds only): print every updater event and state as
- * `[autotest] update ...` lines, install as soon as an update is ready, and quit when the feed has nothing newer
- * (which is what the relaunched, updated app sees), when a notify-mode build has seen the update, or when the check fails.
+ * BW_AUTOTEST_UPDATE=1 or =quit (with BW_UPDATE_FEED_URL, packaged builds only): print every updater event and state
+ * as `[autotest] update ...` lines, and install as soon as an update is ready. With `1`, it installs through "Restart
+ * now" (quitAndInstall, the new version starts); with `quit`, through a plain quit (install on quit, nothing restarts).
+ * It quits when the feed has nothing newer (which is what the relaunched, updated app sees), when a notify-mode build
+ * has seen the update, or when the check fails.
  */
-export function autotestUpdate(updates: UpdateController, quit: () => void): void {
-  console.log(`[autotest] update test armed: mode=${updates.mode}, waiting for the scheduled check`);
+export function autotestUpdate(updates: UpdateController, quit: () => void, how: "restart" | "quit" = "restart"): void {
+  console.log(`[autotest] update test armed: mode=${updates.mode}, install via ${how}, waiting for the scheduled check`);
   updates.subscribe((t) => {
     console.log(`[autotest] update event=${t.event} version=${t.version ?? "-"} state=${JSON.stringify(t.state)}`);
-    if (t.event === "downloaded" && t.state.kind === "ready") {
+    if (t.event === "downloaded" && t.state.kind === "ready" && how === "quit") {
+      console.log(`[autotest] update ready ${t.state.version}; quitting so it installs on quit`);
+      setTimeout(quit, 500);
+    } else if (t.event === "downloaded" && t.state.kind === "ready") {
       console.log(`[autotest] update ready ${t.state.version}; calling quitAndInstall`);
       setTimeout(() => {
         try {
