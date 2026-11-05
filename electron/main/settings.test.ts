@@ -17,12 +17,14 @@ afterEach(() => {
 
 describe("work dir (port of settings.rs tests)", () => {
   it("defaults and expands tilde", () => {
-    const home = "/home/u";
-    expect(resolveWorkDir({ workDir: null }, home)).toBe("/home/u/BuilderWars");
-    expect(resolveWorkDir({ workDir: "~/code/bw" }, home)).toBe("/home/u/code/bw");
-    expect(resolveWorkDir({ workDir: "~" }, home)).toBe("/home/u");
+    // Expected paths use the platform separator: resolveWorkDir joins with node:path ("\\" on Windows).
+    const home = path.join(path.sep, "home", "u");
+    expect(resolveWorkDir({ workDir: null }, home)).toBe(path.join(home, "BuilderWars"));
+    expect(resolveWorkDir({ workDir: "~/code/bw" }, home)).toBe(path.join(home, "code", "bw"));
+    expect(resolveWorkDir({ workDir: "~\\code\\bw" }, home)).toBe(path.join(home, "code\\bw"));
+    expect(resolveWorkDir({ workDir: "~" }, home)).toBe(home);
     expect(resolveWorkDir({ workDir: "/srv/bw" }, home)).toBe("/srv/bw");
-    expect(resolveWorkDir({ workDir: "  " }, home)).toBe("/home/u/BuilderWars");
+    expect(resolveWorkDir({ workDir: "  " }, home)).toBe(path.join(home, "BuilderWars"));
   });
 
   it("creates the README once and keeps the user's copy", () => {
