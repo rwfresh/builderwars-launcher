@@ -24,7 +24,7 @@ pnpm install --frozen-lockfile
 pnpm dev        # electron-vite dev: renderer with HMR, main/preload rebuilt on change
 pnpm build      # typecheck (renderer + electron tsconfigs) and electron-vite build -> out/
 pnpm start      # run the built app (electron .)
-pnpm test       # vitest: agent CLI mapping and quoting, bridge, layout math, main-process helpers
+pnpm test       # vitest: agent CLI mapping and quoting, bridge, layout math, updater, main-process helpers
 ```
 
 Build output: `out/main/index.js`, `out/preload/shell.js`, `out/preload/game.js`, `out/renderer/**`. To package installers, see [Packaging](#packaging-and-releases).
@@ -43,6 +43,8 @@ Options (CLI or env):
 | `BW_REGISTER_DEEPLINK=1` | Registers `builderwars://` for this binary at startup in dev builds. Packaged builds always register at runtime too. |
 | `BW_USE_HERDR=0/1` | Overrides the herdr setting for this run (not saved). |
 | `BW_AUTOTEST=1` | Self-test: once the site has loaded, calls `builderwarsLauncher` from inside the game page (empty prompt and foreign `openX` must be rejected, `runPrompt('hello','claude')` goes through the confirmation) and prints `[autotest]` lines to stdout. |
+| `BW_UPDATE_FEED_URL=http://127.0.0.1:<port>/` | Test hook: packaged builds read updates from this generic feed (a folder with `latest*.yml` and the installers) instead of the public one. Accepted only for http(s) on `127.0.0.1`, `localhost` or `[::1]`; anything else is ignored with a warning. See [Updates](#updates). |
+| `BW_AUTOTEST_UPDATE=1` | Update self-test, needs a packaged build and `BW_UPDATE_FEED_URL`: prints every updater event and state as `[autotest] update ...` lines, installs as soon as the update is ready (`quitAndInstall`), and quits if the feed has nothing newer. |
 | `BW_PTY_LOG=file` | Appends raw PTY output to `file`. |
 | `BW_SNAPSHOT_DIR=dir`, `BW_DEBUG_BOUNDS=1`, `BW_DEVTOOLS=1` | Diagnostics: PNG snapshots of the shell and game views during the self-test (never the X pane), pane bounds logging, detached DevTools for the shell. |
 
@@ -118,6 +120,55 @@ Each decision is logged as `[pane] new-window <scheme://host> -> popup|navigate-
 - The web session denies sensitive permission requests (camera and microphone, location, notifications, MIDI, HID, serial, USB, screen capture).
 - Pages on the site origin, and any page that opens a `builderwars://` link, can only *ask* to run a prompt. The player sees the full prompt and must press Run (site prompts can be allowed for the session). An XSS on builderwars.ai still gets as far as that dialog, so keep the site's CSP tight.
 
+## Updates
+
+Packaged builds keep themselves up to date from the public feed, the latest release of
+[rwfresh/builderwars-releases](https://github.com/rwfresh/builderwars-releases) (`publish` in `electron-builder.yml`,
+embedded in the app as `resources/app-update.yml`). The code is `electron/main/updater.ts` (electron-updater) and the
+banner above the terminal's status line.
+
+- **When:** about 10 seconds after startup, then every 4 hours, never two checks at once. SETTINGS > CHECK FOR UPDATES
+  checks right away and answers "You're on the latest version (x.y.z)" or the error. Background checks that fail (for
+  example offline) are only logged (`[updater]` lines), never shown.
+- **macOS, Windows, Linux AppImage (automatic):** the update downloads in the background (the banner shows the progress),
+  then "Builder Wars x.y.z is ready. [RESTART NOW] [LATER]". Restart installs it and starts the new version. LATER hides
+  the banner until the next launch, and the update installs when you quit anyway. macOS installs from the zip
+  (Squirrel.Mac), Windows runs the NSIS installer, and the AppImage replaces its own file. An AppImage whose file name
+  contains a version (`builderwars-launcher-0.2.0-linux-x86_64.AppImage`) is replaced by a file named for the new
+  version; rename it to something without a version (`BuilderWars.AppImage`) to keep one path.
+- **Linux deb and rpm (notify only):** the banner says "Builder Wars x.y.z is available. [DOWNLOAD]", and DOWNLOAD opens
+  [builderwars.ai/download](https://builderwars.ai/download) in your browser. The app never installs packages, because
+  that needs root (`pkexec`). Update through your package manager or the downloaded package.
+- **Never updated:** unpackaged and dev builds (`pnpm dev`, `pnpm start`, `--linux dir`) don't run the updater and make no
+  update requests.
+- **Rules:** prereleases are ignored (a bad release is pulled by marking it a prerelease) and downgrades are refused. The
+  feed can't be changed from settings or by a web page; the only override is `BW_UPDATE_FEED_URL`, limited to loopback
+  addresses, for tests. Logs carry versions and error messages, and URLs without their query strings.
+
+### Test an update end to end (Linux AppImage)
+
+Build two AppImages that differ only in version, serve the newer one as a feed, and let the older one update itself:
+
+```bash
+pnpm build
+pnpm exec electron-builder --linux AppImage --publish never -c.extraMetadata.version=0.2.0 -c.directories.output=/tmp/bw-up/A
+pnpm exec electron-builder --linux AppImage --publish never -c.extraMetadata.version=0.2.1 -c.directories.output=/tmp/bw-up/B
+mkdir -p /tmp/bw-up/feed /tmp/bw-up/run
+cp /tmp/bw-up/B/latest-linux.yml /tmp/bw-up/B/*.AppImage /tmp/bw-up/feed/
+cp /tmp/bw-up/A/*.AppImage /tmp/bw-up/run/BuilderWars.AppImage   # no version in the name: replaced in place
+python3 -m http.server 18765 --bind 127.0.0.1 --directory /tmp/bw-up/feed &
+
+BW_UPDATE_FEED_URL=http://127.0.0.1:18765/ BW_AUTOTEST_UPDATE=1 BW_USE_HERDR=0 BW_DATA_ROOT=/tmp/bw-up/data \
+  XDG_CACHE_HOME=/tmp/bw-up/cache /tmp/bw-up/run/BuilderWars.AppImage
+sha512sum /tmp/bw-up/run/BuilderWars.AppImage /tmp/bw-up/feed/*.AppImage   # the same once it has updated
+```
+
+Expect `[autotest] update event=available version=0.2.1`, `... event=downloaded ...`, `[updater] installing 0.2.1 and
+restarting (quitAndInstall)` and `[launcher] quitting: ...`. The new version then starts by itself, finds nothing newer
+and quits (its output is not attached to your terminal). `XDG_CACHE_HOME` keeps the downloaded update out of your real
+`~/.cache`. Without range-request support in the server (Python's isn't), electron-updater logs that the differential
+download failed and downloads the whole file, which is fine for this test.
+
 ## Packaging and releases
 
 Config: `electron-builder.yml`. Icons and installer resources: `build/` (`icon.png` 512 px, `icon.icns`, `icon.ico`, `entitlements.mac.plist`, `installer.nsh`). Output: `release/`.
@@ -126,7 +177,8 @@ Config: `electron-builder.yml`. Icons and installer resources: `build/` (`icon.p
 |---|---|
 | Linux (x64) | AppImage, deb, rpm (`builderwars-launcher`, category Game) |
 | Windows (x64) | NSIS installer, per-user (no admin prompt) |
-| macOS | one dmg per arch, x64 and arm64 (not universal: node-pty ships per-arch prebuilds, and each dmg is half the size) |
+| macOS | one dmg per arch, x64 and arm64 (not universal: node-pty ships per-arch prebuilds, and each dmg is half the size), plus a zip per arch (`builderwars-launcher-<version>-macos-<arch>.zip` and its `.zip.blockmap`), which the in-app updater (Squirrel.Mac) installs from |
+| Update metadata | `latest-linux.yml`, `latest.yml` (Windows), `latest-mac.yml` and `.blockmap` files, written next to the installers. A release must carry them all, plus the mac zips, for [Updates](#updates) to work. |
 
 Package locally (after `build`):
 
@@ -154,7 +206,9 @@ For deb and rpm, electron-builder runs its bundled fpm, whose Ruby needs `libcry
 
 ## Follow-ups
 
-- **Updater:** add `electron-updater` and call `autoUpdater.checkForUpdatesAndNotify()` from main, and add a `zip` mac target (Squirrel.Mac needs it). `publish` in `electron-builder.yml` already points at the public repo `rwfresh/builderwars-releases` (tags `v<version>`), and every published release there carries `latest*.yml` and the blockmaps.
+- **Updates on macOS and Windows** are untested at runtime (the Linux AppImage path was tested end to end). Once Windows
+  builds are signed, electron-builder writes `publisherName` into `app-update.yml` and electron-updater checks the
+  installer's signature before running it.
 - **Tray icon** and level-up notifications.
 - **Windows code signing** once a certificate exists (electron-builder `win.signtoolOptions` or Azure Trusted Signing).
 - Electron fuses (`electronFuses`): keep `runAsNode` on, because node-pty on Windows forks a helper with `child_process.fork`.
