@@ -628,7 +628,7 @@ function SettingsPanel({
     <div className="settings">
       <h2>Settings</h2>
       <label>
-        Theme
+        Appearance
         <select value={draft.theme} onChange={(e) => isThemeId(e.target.value) && setDraft({ ...draft, theme: e.target.value })}>
           {THEME_IDS.map((t) => (
             <option key={t} value={t}>
