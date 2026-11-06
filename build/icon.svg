@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 -6 132 132">
+<!-- Builder Wars app icon: the "Prompt Badge", the same mark as builderwars.ai (apps/web/brand/build.sh in the private
+     game repo), as a light badge on a transparent background. Run build/icons.sh after changing it. -->
+<polygon points="24,4 96,4 116,24 116,96 96,116 24,116 4,96 4,24" fill="#e7e9ea" stroke="#e7e9ea" stroke-width="8" stroke-linejoin="round"/>
+<polyline points="34,38 56,60 34,82" fill="none" stroke="#0f1419" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="62" y="72" width="30" height="15" rx="7" fill="#1d9bf0"/>
+</svg>
