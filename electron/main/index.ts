@@ -412,7 +412,16 @@ function start(): void {
     console.log(`[launcher] web user agent ${panes.game.webContents.session.getUserAgent()}`);
 
     const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined;
-    const loaded = devUrl ? shell.loadURL(devUrl) : shell.loadFile(path.join(here, "../renderer/index.html"));
+    // The saved theme rides along as ?theme= so the shell paints its boot screen in it (src/main.tsx validates it).
+    const theme = settings.theme;
+    let loaded: Promise<void>;
+    if (devUrl) {
+      const u = new URL(devUrl);
+      u.searchParams.set("theme", theme);
+      loaded = shell.loadURL(u.href);
+    } else {
+      loaded = shell.loadFile(path.join(here, "../renderer/index.html"), { query: { theme } });
+    }
     loaded.catch((e: unknown) => console.error(`[launcher] shell failed to load: ${String(e)}`));
     panes.start();
     if (process.env.BW_DEVTOOLS === "1") shell.openDevTools({ mode: "detach" });
