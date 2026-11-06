@@ -19,7 +19,10 @@ Change it in the launcher toolbar (the folder under the terminal > Change). Dele
 recreates it (empty) the next time it starts with the default setting.
 `;
 
-/** Same shape as the Rust serde struct: camelCase, every field optional with a default. */
+/**
+ * Same shape as the Rust serde struct: camelCase, every field optional with a default. Strict: `settings:set` uses it,
+ * so the shell can't save an unknown theme.
+ */
 export const settingsSchema = z.object({
   defaultAgent: z.string().nullable().default(DEFAULT_SETTINGS.defaultAgent),
   useHerdr: z.boolean().nullable().default(DEFAULT_SETTINGS.useHerdr),
@@ -29,10 +32,18 @@ export const settingsSchema = z.object({
   theme: z.enum(THEME_IDS).default(DEFAULT_SETTINGS.theme),
 });
 
-/** Missing file, bad JSON or wrong types: defaults (like serde's `unwrap_or_default`). */
+/**
+ * settings.json as read from disk. A theme this version doesn't know (written by a newer launcher, or edited by hand)
+ * falls back to the default on its own instead of failing the parse and resetting every other setting.
+ */
+const storedSettingsSchema = settingsSchema.extend({
+  theme: z.enum(THEME_IDS).catch(DEFAULT_SETTINGS.theme),
+});
+
+/** Missing file, bad JSON or wrong types: defaults (like serde's `unwrap_or_default`). An unknown theme: default theme. */
 export function loadSettings(file: string): Settings {
   try {
-    const r = settingsSchema.safeParse(JSON.parse(fs.readFileSync(file, "utf8")));
+    const r = storedSettingsSchema.safeParse(JSON.parse(fs.readFileSync(file, "utf8")));
     return r.success ? r.data : { ...DEFAULT_SETTINGS };
   } catch {
     return { ...DEFAULT_SETTINGS };
