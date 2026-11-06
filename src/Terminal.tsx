@@ -3,7 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { ptyIsIdle, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyMode } from "./ipc";
-import { TERMINAL_THEMES, type ThemeId } from "./themes";
+import { TERMINAL_MIN_CONTRAST, TERMINAL_THEMES, type ThemeId } from "./themes";
 
 export interface TerminalHandle {
   /** Type a command line + Enter into the PTY. */
@@ -49,6 +49,7 @@ export const Terminal = forwardRef<TerminalHandle, Props>(function Terminal({ mo
     if (!el) return;
     const t = new XTerm({
       theme: TERMINAL_THEMES[themeRef.current],
+      minimumContrastRatio: TERMINAL_MIN_CONTRAST[themeRef.current],
       fontFamily: '"JetBrains Mono", "JetBrainsMono Nerd Font", "Fira Code", ui-monospace, monospace',
       fontSize: 13,
       cursorBlink: false, // a blinking cursor keeps the webview repainting (idle CPU)
@@ -128,7 +129,9 @@ export const Terminal = forwardRef<TerminalHandle, Props>(function Terminal({ mo
   }, [mode]);
 
   useEffect(() => {
-    if (term.current) term.current.options.theme = TERMINAL_THEMES[theme];
+    if (!term.current) return;
+    term.current.options.theme = TERMINAL_THEMES[theme];
+    term.current.options.minimumContrastRatio = TERMINAL_MIN_CONTRAST[theme];
   }, [theme]);
 
   useEffect(() => {
