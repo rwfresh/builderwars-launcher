@@ -22,6 +22,7 @@
   --link: #1d9bf0;
   --live: #00ba7c;
   --danger: #f4212e;
+  --warn: #ffb000;
   color-scheme: dark;
 }
 
@@ -42,6 +43,7 @@
   --link: #1d9bf0;
   --live: #00ba7c;
   --danger: #f4212e;
+  --warn: #ffb000;
   color-scheme: dark;
 }
 
@@ -62,6 +64,7 @@
   --link: #1270b8;
   --live: #00805a;
   --danger: #d0141f;
+  --warn: #a35d00;
   color-scheme: light;
 }
 
@@ -550,13 +553,19 @@ input[type="checkbox"]:focus {
 
 .confirm {
   inset: 10px;
-  border: 1px solid var(--outline);
+  border: 2px solid var(--warn);
   border-radius: 16px;
   background: var(--bg);
+  box-shadow: inset 0 0 24px color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
-.confirm h2 svg {
-  color: var(--link);
+.confirm h2,
+.confirm .requester {
+  color: var(--warn);
+}
+
+.confirm .requester {
+  font-weight: 700;
 }
 
 .facts {
@@ -574,11 +583,6 @@ input[type="checkbox"]:focus {
 
 .muted {
   color: var(--muted);
-}
-
-.strong {
-  color: var(--text);
-  font-weight: 700;
 }
 
 .err {

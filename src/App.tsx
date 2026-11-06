@@ -729,11 +729,11 @@ function ConfirmPanel({
       <p className="muted">
         {req.source === "site" ? (
           <>
-            <b className="strong">{siteHost}</b> asks to start an agent in your terminal.
+            <b className="requester">{siteHost}</b> asks to start an agent in your terminal.
           </>
         ) : (
           <>
-            A <b className="strong">builderwars://</b> link (opened by a web page or another app) asks to start an agent in your
+            A <b className="requester">builderwars://</b> link (opened by a web page or another app) asks to start an agent in your
             terminal.
           </>
         )}
