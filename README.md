@@ -229,6 +229,10 @@ Security problems go through a private report, not an issue: see [SECURITY.md](S
 
 The source code is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Rich Williams and contributors.
 
+The app bundles the [Inter](https://github.com/rsms/inter) font (from `@fontsource-variable/inter`), licensed under the SIL
+Open Font License 1.1. Its license text is in [licenses/Inter-OFL-1.1.txt](licenses/Inter-OFL-1.1.txt) and ships in every
+package as `licenses/Inter-OFL-1.1.txt` in the app's resources folder (`extraResources` in `electron-builder.yml`).
+
 The license covers the code, not the brand. The "Builder Wars" name and the app icons in `build/` identify the official app;
 if you distribute a modified build, give it a different name and icon so players can tell it apart from the one at
 builderwars.ai/download.

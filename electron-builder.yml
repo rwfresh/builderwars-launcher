@@ -24,6 +24,14 @@ files:
   - "!**/node_modules/node-pty/build/Release/obj.target/**"
   - "!**/node_modules/node-pty/**/*.pdb"
 
+# Third-party notices that must travel with every package: the Inter UI font (SIL OFL 1.1) is bundled into
+# out/renderer/assets, and the OFL requires its license text alongside it. Lands in <resources>/licenses/ on every
+# platform (macOS: Contents/Resources/licenses). electron/main/licenses.test.ts keeps the copy in sync with the package.
+extraResources:
+  - from: licenses
+    to: licenses
+    filter: ["*.txt"]
+
 asar: true
 # node-pty loads pty.node and execs spawn-helper (macOS) / winpty-agent.exe (Windows) from disk;
 # it rewrites app.asar -> app.asar.unpacked itself.
