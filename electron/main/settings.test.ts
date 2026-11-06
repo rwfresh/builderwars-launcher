@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "../shared/contract";
-import { ensureWorkDir, loadSettings, parseSiteUrl, resolveSiteUrl, resolveWorkDir, saveSettings } from "./settings";
+import { ensureWorkDir, loadSettings, parseSiteUrl, resolveSiteUrl, resolveWorkDir, saveSettings, settingsSchema } from "./settings";
 
 const tmp: string[] = [];
 function tmpDir(): string {
@@ -68,6 +68,20 @@ describe("settings file", () => {
     expect(loadSettings(file).theme).toBe("dim");
     fs.writeFileSync(file, JSON.stringify({ theme: "neon" }));
     expect(loadSettings(file)).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it("drops only an unknown or invalid stored theme and keeps the other settings", () => {
+    const file = path.join(tmpDir(), "settings.json");
+    const saved = { defaultAgent: "codex", useHerdr: false, grokUrl: "https://x.com/i/grok", siteUrl: "http://localhost:3000", workDir: "~/bw" };
+    for (const theme of ["neon", 42, null]) {
+      fs.writeFileSync(file, JSON.stringify({ ...saved, theme }));
+      expect(loadSettings(file)).toEqual({ ...saved, theme: "lights-out" });
+    }
+  });
+
+  it("still rejects an unknown theme over IPC (settings:set validates with settingsSchema)", () => {
+    expect(settingsSchema.safeParse({ ...DEFAULT_SETTINGS, theme: "neon" }).success).toBe(false);
+    expect(settingsSchema.safeParse({ ...DEFAULT_SETTINGS, theme: "dim" }).success).toBe(true);
   });
 });
 
