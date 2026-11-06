@@ -9,7 +9,7 @@ These keep players safe and the game fair. Pull requests that break them won't b
 - **The X pane is off limits.** Nothing of ours runs in x.com or reads it: no preload, no injected scripts, no DOM, cookie
   or console access, no automation. The launcher never posts, follows or acts on X for a player.
 - **Prompts from outside need the player's OK.** Every prompt that comes from a web page or a `builderwars://` link goes
-  through the "RUN PROMPT?" confirmation before it reaches the terminal. Don't add a path around it.
+  through the "Run prompt?" confirmation before it reaches the terminal. Don't add a path around it.
 - **Keep the sandbox.** Renderers keep `contextIsolation`, `sandbox` and no `nodeIntegration`. Every IPC handler checks its
   sender and validates its payload with zod.
 - **The site bridge is a contract with the live site.** Open an issue before changing the shape or `version` of

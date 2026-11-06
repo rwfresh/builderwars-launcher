@@ -25,11 +25,14 @@ export interface EnvInfo {
   herdr: boolean;
 }
 
-/** Shell color themes (src/styles.css, src/themes.ts). They style our own UI only, never the web panes. */
+/** Shell color themes (src/styles.css, src/themes.ts). They style our own UI only, never the pages in the web panes. */
 export const THEME_IDS = ["lights-out", "dim", "light"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 
-/** Window and web-view background per theme, shown before a page has painted. Matches `--bg` in src/styles.css. */
+/**
+ * Window and web-view background per theme: shows before a page paints and behind pages that leave their background
+ * transparent. Matches `--bg` in src/styles.css and the terminal background in src/themes.ts (src/themes.test.ts).
+ */
 export const THEME_BACKGROUNDS: Record<ThemeId, string> = {
   "lights-out": "#000000",
   dim: "#15202b",

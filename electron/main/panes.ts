@@ -53,7 +53,7 @@ export interface PanesDeps {
   gameStartUrl: string;
   gamePreload: string;
   bridgeConfig: GameBridgeConfig;
-  /** Shown before a page has painted (the shell theme's background). */
+  /** The views' background (the shell theme's): shows before a page paints and behind transparent pages. */
   background: string;
   send<E extends ShellEventName>(event: E, payload: ShellEventPayloads[E]): void;
   /** F6 pressed in a pane: the shell cycles focus. */
@@ -97,7 +97,11 @@ export class Panes {
     return pane === "game" ? this.game : this.xpane;
   }
 
-  /** Theme changed: the color shown behind a page that has not painted yet. Pages themselves are untouched. */
+  /**
+   * Theme changed: set the views' own background color. It shows before a page paints and behind any page that leaves
+   * its background transparent. Nothing is injected into the pages and their CSS (prefers-color-scheme included) is
+   * not changed.
+   */
   setBackground(color: string): void {
     this.game.setBackgroundColor(color);
     this.xpane.setBackgroundColor(color);

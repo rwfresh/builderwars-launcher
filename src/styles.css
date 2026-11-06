@@ -1,7 +1,9 @@
 /*
  * Shell UI styles. X-style look: flat black (or Dim / Light), 1px column lines, pill buttons, Inter for the UI and
- * JetBrains Mono for the terminal and prompts. The theme is chosen in Settings and set as <html data-theme>;
- * src/themes.ts holds the matching terminal palettes and electron/shared/contract.ts the window backgrounds.
+ * JetBrains Mono for the terminal and prompts. The theme is chosen in Settings and set as :root[data-theme] (the
+ * <html> element); src/themes.ts holds the matching terminal palettes and electron/shared/contract.ts the window
+ * backgrounds. src/themes.test.ts checks --bg against both and the text tokens' contrast (4.5:1 or better).
+ * --warn marks the Run prompt? confirmation, which has to stand out from Settings in every theme.
  */
 
 :root,
